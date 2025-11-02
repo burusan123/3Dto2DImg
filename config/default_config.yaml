@@ -86,7 +86,7 @@ camera:
   mouse_drag:
     sensitivity: 2.0  # ドラッグ感度（大きいほど敏感）
     invert_x: true    # X軸を反転（true: マウス右でカメラ左＝画面が右に動く）
-    invert_y: true    # Y軸を反転（true: マウス下でカメラ前進＝画面が手前に来る）
+    invert_y: true    # Y軸を反転（true: マウス下でカメラ下降＝画面が下に動く）
   
   # 右クリックドラッグ設定（カメラビュー回転 - UE5スタイル）
   mouse_view_rotation:

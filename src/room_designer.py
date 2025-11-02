@@ -504,8 +504,15 @@ class RoomDesigner:
         self.camera_dragging = False
         self.camera_drag_start_x = 0
         self.camera_drag_start_y = 0
-        self.camera_drag_start_cam_x = 0.0
         self.camera_drag_start_cam_y = 0.0
+        self.camera_drag_start_cam_z = 0.0
+        
+        # 左ドラッグによるUE5スタイルカメラ移動用の状態
+        self.ue5_camera_moving = False
+        self.ue5_move_start_x = 0
+        self.ue5_move_start_y = 0
+        self.ue5_move_start_cam_x = 0.0
+        self.ue5_move_start_yaw = 0.0
         
         # 右クリックドラッグによるカメラビュー回転用の状態
         self.view_rotating = False
@@ -513,6 +520,13 @@ class RoomDesigner:
         self.view_rotation_start_y = 0
         self.view_rotation_start_pitch = 0.0
         self.view_rotation_start_yaw = 0.0
+        
+        # 右+左同時ドラッグによるY/Z軸移動用の状態
+        self.both_buttons_moving = False
+        self.both_buttons_start_x = 0
+        self.both_buttons_start_y = 0
+        self.both_buttons_start_cam_y = 0.0
+        self.both_buttons_start_cam_z = 0.0
         
         # 部屋の作成
         room_width, room_depth, room_height = self.config.get_room_dimensions()
@@ -631,47 +645,92 @@ class RoomDesigner:
         :param param: パラメータ
         """
         if event == cv2.EVENT_LBUTTONDOWN:
-            # 左クリック: 家具の選択開始
-            furniture = self.room.find_furniture_at_point(x, y, self.transform, self.width, self.height)
+            # 左クリック: 家具の選択開始、またはUE5スタイルカメラ移動開始
             
-            if furniture:
-                # 以前の選択を解除
-                if self.selected_furniture:
-                    self.selected_furniture.is_selected = False
+            # 右ボタンも押されている場合は両ボタンモード
+            if self.view_rotating:
+                self.both_buttons_moving = True
+                self.both_buttons_start_x = x
+                self.both_buttons_start_y = y
+                self.both_buttons_start_cam_y = self.camera_y
+                self.both_buttons_start_cam_z = self.camera_z
+                # 他のモードを無効化
+                self.view_rotating = False
+                self.ue5_camera_moving = False
+                self.dragging = False
+                return
+            
+            # Shiftキーが押されているか確認（強制的にカメラ移動モード）
+            shift_pressed = (flags & cv2.EVENT_FLAG_SHIFTKEY) != 0
+            
+            if not shift_pressed:
+                # 家具を探す
+                furniture = self.room.find_furniture_at_point(x, y, self.transform, self.width, self.height)
                 
-                # 新しい家具を選択
-                self.selected_furniture = furniture
-                furniture.is_selected = True
-                self.dragging = True
-                
-                # クリック位置を3D座標に変換
-                click_world_pos = self._screen_to_world(x, y)
-                if click_world_pos is not None:
-                    click_world_x, click_world_y = click_world_pos
-                    # 家具の位置とクリック位置の差分を保存（オフセット）
-                    self.drag_offset_x = furniture.x - click_world_x
-                    self.drag_offset_y = furniture.y - click_world_y
+                if furniture:
+                    # 以前の選択を解除
+                    if self.selected_furniture:
+                        self.selected_furniture.is_selected = False
+                    
+                    # 新しい家具を選択
+                    self.selected_furniture = furniture
+                    furniture.is_selected = True
+                    self.dragging = True
+                    
+                    # クリック位置を3D座標に変換
+                    click_world_pos = self._screen_to_world(x, y)
+                    if click_world_pos is not None:
+                        click_world_x, click_world_y = click_world_pos
+                        # 家具の位置とクリック位置の差分を保存（オフセット）
+                        self.drag_offset_x = furniture.x - click_world_x
+                        self.drag_offset_y = furniture.y - click_world_y
                 else:
-                    # 変換できない場合は家具の中心を基準にする
-                    self.drag_offset_x = 0.0
-                    self.drag_offset_y = 0.0
+                    # 家具がない場合はUE5スタイルカメラ移動開始
+                    self.ue5_camera_moving = True
+                    self.ue5_move_start_x = x
+                    self.ue5_move_start_y = y
+                    self.ue5_move_start_cam_x = self.camera_x
+                    self.ue5_move_start_yaw = self.camera_yaw
             else:
-                # 空白をクリックした場合は選択解除
-                if self.selected_furniture:
-                    self.selected_furniture.is_selected = False
-                    self.selected_furniture = None
+                # Shift+左クリック: 強制的にUE5スタイルカメラ移動
+                self.ue5_camera_moving = True
+                self.ue5_move_start_x = x
+                self.ue5_move_start_y = y
+                self.ue5_move_start_cam_x = self.camera_x
+                self.ue5_move_start_yaw = self.camera_yaw
         
         elif event == cv2.EVENT_MBUTTONDOWN:
             # ホイールクリック: カメラ移動開始
             self.camera_dragging = True
             self.camera_drag_start_x = x
             self.camera_drag_start_y = y
-            self.camera_drag_start_cam_x = self.camera_x
             self.camera_drag_start_cam_y = self.camera_y
+            self.camera_drag_start_cam_z = self.camera_z
         
         elif event == cv2.EVENT_MOUSEMOVE:
             # マウス移動: ドラッグ中の処理
-            if self.dragging and self.selected_furniture:
+            if self.both_buttons_moving:
+                # 右+左同時ドラッグ: Y/Z軸移動（左右・上下移動）
+                delta_x = x - self.both_buttons_start_x
+                delta_y = y - self.both_buttons_start_y
+                
+                # UE5の動作:
+                # - 左右ドラッグ（delta_x）→ Y軸移動（左右）
+                # - 上下ドラッグ（delta_y）→ Z軸移動（上下）
+                
+                # Y軸移動（左右）
+                self.camera_y = self.both_buttons_start_cam_y + delta_x * self.mouse_drag_sensitivity
+                
+                # Z軸移動（上下）
+                # 上にドラッグ（delta_y < 0）→ 上昇（Z増加）
+                # 下にドラッグ（delta_y > 0）→ 下降（Z減少）
+                move_amount = -delta_y * self.mouse_drag_sensitivity
+                self.camera_z = self.both_buttons_start_cam_z + move_amount
+                
+                # 最低高さ制限
+                self.camera_z = max(10, self.camera_z)
+            
+            elif self.dragging and self.selected_furniture:
                 # 家具のドラッグ
                 # 2D座標を3D座標に逆変換（床面上）
                 world_pos = self._screen_to_world(x, y)
@@ -686,6 +745,26 @@ class RoomDesigner:
                     # 座標精度を適用して移動
                     self.selected_furniture.move_to(world_x, world_y, self.precision)
             
+            elif self.ue5_camera_moving:
+                # UE5スタイルのカメラ移動（左ドラッグ）
+                # マウスの移動量を計算
+                delta_x = x - self.ue5_move_start_x
+                delta_y = y - self.ue5_move_start_y
+                
+                # UE5の動作:
+                # - マウス左右（delta_x）→ カメラのYaw回転（左右を向く）
+                # - マウス上下（delta_y）→ カメラのX座標移動（前後移動）
+                
+                # Yaw回転（左右を向く）
+                delta_yaw = delta_x * self.mouse_view_rotation_sensitivity
+                self.camera_yaw = self.ue5_move_start_yaw + delta_yaw
+                
+                # 前後移動（X軸方向）
+                # 上にドラッグ（delta_y < 0）→ 前進（X増加）
+                # 下にドラッグ（delta_y > 0）→ 後退（X減少）
+                move_amount = delta_y * self.mouse_drag_sensitivity
+                self.camera_x = self.ue5_move_start_cam_x + move_amount
+            
             elif self.camera_dragging:
                 # カメラのドラッグ（ホイールボタン）
                 # マウスの移動量を計算
@@ -696,11 +775,15 @@ class RoomDesigner:
                 x_direction = -1 if self.mouse_drag_invert_x else 1
                 y_direction = -1 if self.mouse_drag_invert_y else 1
                 
-                # カメラ座標を更新（UE5スタイル: X=前、Y=右）
+                # カメラ座標を更新
                 # マウス左右（delta_x） → カメラY座標（右方向）
-                # マウス上下（delta_y） → カメラX座標（前方向）
-                self.camera_y = self.camera_drag_start_cam_y + delta_x * self.mouse_drag_sensitivity * x_direction
-                self.camera_x = self.camera_drag_start_cam_x - delta_y * self.mouse_drag_sensitivity * y_direction
+                # マウス上下（delta_y） → カメラZ座標（上方向）
+                # x_directionを反転（左右の反対を修正）
+                self.camera_y = self.camera_drag_start_cam_y - delta_x * self.mouse_drag_sensitivity * x_direction
+                self.camera_z = self.camera_drag_start_cam_z + delta_y * self.mouse_drag_sensitivity * y_direction
+                
+                # 最低高さ制限
+                self.camera_z = max(10, self.camera_z)
             
             elif self.view_rotating:
                 # カメラビューの回転（右クリックドラッグ - UE5スタイル）
@@ -728,10 +811,34 @@ class RoomDesigner:
         
         elif event == cv2.EVENT_LBUTTONUP:
             # 左クリック解放: ドラッグ終了
-            self.dragging = False
+            if self.both_buttons_moving:
+                # 両ボタンモードから左を離した場合、右クリック回転モードに切り替え
+                self.both_buttons_moving = False
+                self.view_rotating = True
+                self.view_rotation_start_x = x
+                self.view_rotation_start_y = y
+                self.view_rotation_start_pitch = self.camera_pitch
+                self.view_rotation_start_yaw = self.camera_yaw
+            else:
+                self.dragging = False
+                self.ue5_camera_moving = False
         
         elif event == cv2.EVENT_RBUTTONDOWN:
             # 右クリック: カメラビュー回転開始
+            
+            # 左ボタンも押されている場合は両ボタンモード
+            if self.ue5_camera_moving or self.dragging:
+                self.both_buttons_moving = True
+                self.both_buttons_start_x = x
+                self.both_buttons_start_y = y
+                self.both_buttons_start_cam_y = self.camera_y
+                self.both_buttons_start_cam_z = self.camera_z
+                # 他のモードを無効化
+                self.ue5_camera_moving = False
+                self.dragging = False
+                self.view_rotating = False
+                return
+            
             self.view_rotating = True
             self.view_rotation_start_x = x
             self.view_rotation_start_y = y
@@ -740,7 +847,16 @@ class RoomDesigner:
         
         elif event == cv2.EVENT_RBUTTONUP:
             # 右クリック解放: カメラビュー回転終了
-            self.view_rotating = False
+            if self.both_buttons_moving:
+                # 両ボタンモードから右を離した場合、左ドラッグモードに切り替え
+                self.both_buttons_moving = False
+                self.ue5_camera_moving = True
+                self.ue5_move_start_x = x
+                self.ue5_move_start_y = y
+                self.ue5_move_start_cam_x = self.camera_x
+                self.ue5_move_start_yaw = self.camera_yaw
+            else:
+                self.view_rotating = False
         
         elif event == cv2.EVENT_MBUTTONUP:
             # ホイールボタン解放: カメラドラッグ終了
@@ -801,9 +917,12 @@ class RoomDesigner:
             "Q/E: Rotate View",
             "R/F: Move Up/Down",
             "Z/X or Wheel: Zoom In/Out",
-            "Mouse Left: Drag furniture",
-            "Mouse Middle: Pan camera",
+            "Mouse Left: Move forward/back + Yaw (UE5)",
+            "Mouse Left (on furniture): Drag furniture",
+            "Shift+Mouse Left: Force camera move",
             "Mouse Right: Rotate view (UE5 style)",
+            "Mouse Left+Right: Move up/down (UE5)",
+            "Mouse Middle: Pan camera",
             "P: Export coordinates",
             "Esc: Quit"
         ]
