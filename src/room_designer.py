@@ -295,6 +295,11 @@ class RoomDesigner:
         self.movement_speed = self.config.get_camera_movement_speed()
         self.rotation_speed = self.config.get_camera_rotation_speed()
         
+        # ホイールドラッグ設定
+        self.mouse_drag_sensitivity = self.config.get_mouse_drag_sensitivity()
+        self.mouse_drag_invert_x = self.config.get_mouse_drag_invert_x()
+        self.mouse_drag_invert_y = self.config.get_mouse_drag_invert_y()
+        
         # UI設定
         self.instructions_config = self.config.get_instructions_config()
         self.zoom_display_config = self.config.get_zoom_display_config()
@@ -313,6 +318,13 @@ class RoomDesigner:
         self.dragging = False
         self.drag_offset_x = 0.0
         self.drag_offset_y = 0.0
+        
+        # ホイールドラッグによるカメラ移動用の状態
+        self.camera_dragging = False
+        self.camera_drag_start_x = 0
+        self.camera_drag_start_y = 0
+        self.camera_drag_start_cam_x = 0.0
+        self.camera_drag_start_cam_y = 0.0
         
         # 部屋の作成
         room_width, room_depth, room_height = self.config.get_room_dimensions()
@@ -376,6 +388,12 @@ class RoomDesigner:
                 drag_text = f"Dragging: {self.selected_furniture.name}"
                 cv2.putText(img, drag_text, (10, self.height - 50), cv2.FONT_HERSHEY_SIMPLEX, 
                            0.6, (0, 255, 0), 2, cv2.LINE_AA)
+            
+            # カメラドラッグ中の情報を表示
+            if self.camera_dragging:
+                camera_drag_text = "Camera Pan (Middle Button Drag)"
+                cv2.putText(img, camera_drag_text, (10, self.height - 50), cv2.FONT_HERSHEY_SIMPLEX, 
+                           0.6, (0, 255, 255), 2, cv2.LINE_AA)
 
             cv2.imshow("3D Room Designer", img)
 
@@ -425,9 +443,18 @@ class RoomDesigner:
                     self.selected_furniture.is_selected = False
                     self.selected_furniture = None
         
+        elif event == cv2.EVENT_MBUTTONDOWN:
+            # ホイールクリック: カメラ移動開始
+            self.camera_dragging = True
+            self.camera_drag_start_x = x
+            self.camera_drag_start_y = y
+            self.camera_drag_start_cam_x = self.camera_x
+            self.camera_drag_start_cam_y = self.camera_y
+        
         elif event == cv2.EVENT_MOUSEMOVE:
-            # マウス移動: ドラッグ中なら家具を移動
+            # マウス移動: ドラッグ中の処理
             if self.dragging and self.selected_furniture:
+                # 家具のドラッグ
                 # 2D座標を3D座標に逆変換（床面上）
                 world_pos = self._screen_to_world(x, y)
                 if world_pos is not None:
@@ -440,10 +467,28 @@ class RoomDesigner:
                     world_y = max(0, min(world_y, self.room.depth - self.selected_furniture.depth))
                     # 座標精度を適用して移動
                     self.selected_furniture.move_to(world_x, world_y, self.precision)
+            
+            elif self.camera_dragging:
+                # カメラのドラッグ（ホイールボタン）
+                # マウスの移動量を計算
+                delta_x = x - self.camera_drag_start_x
+                delta_y = y - self.camera_drag_start_y
+                
+                # 設定に基づいて方向を反転
+                x_direction = -1 if self.mouse_drag_invert_x else 1
+                y_direction = -1 if self.mouse_drag_invert_y else 1
+                
+                # カメラ座標を更新（設定に応じた方向）
+                self.camera_x = self.camera_drag_start_cam_x + delta_x * self.mouse_drag_sensitivity * x_direction
+                self.camera_y = self.camera_drag_start_cam_y - delta_y * self.mouse_drag_sensitivity * y_direction
         
         elif event == cv2.EVENT_LBUTTONUP:
             # 左クリック解放: ドラッグ終了
             self.dragging = False
+        
+        elif event == cv2.EVENT_MBUTTONUP:
+            # ホイールボタン解放: カメラドラッグ終了
+            self.camera_dragging = False
     
     def _screen_to_world(self, screen_x: int, screen_y: int) -> Optional[Tuple[float, float]]:
         """
@@ -492,7 +537,8 @@ class RoomDesigner:
             "Q/E: Rotate View",
             "R/F: Move Up/Down",
             "Z/X: Zoom In/Out",
-            "Mouse: Drag furniture",
+            "Mouse Left: Drag furniture",
+            "Mouse Middle: Pan camera",
             "P: Export coordinates",
             "Esc: Quit"
         ]

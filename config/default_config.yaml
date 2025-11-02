@@ -2,8 +2,8 @@
 
 # ウィンドウ設定
 window:
-  width: 1920
-  height: 1080
+  width: 1280 
+  height: 720
 
 # 座標精度設定（建築設計図・3DCAD対応）
 coordinate_precision:
@@ -47,6 +47,12 @@ camera:
   # 移動・回転速度
   movement_speed: 10  # カメラ移動速度
   rotation_speed: 5   # カメラ回転速度
+  
+  # ホイールドラッグ設定
+  mouse_drag:
+    sensitivity: 2.0  # ドラッグ感度（大きいほど敏感）
+    invert_x: false   # X軸を反転（true: マウス右でカメラ左、false: マウス右でカメラ右）
+    invert_y: false   # Y軸を反転（true: マウス下でカメラ前進、false: マウス下でカメラ後退）
 
 # 部屋設定
 room:

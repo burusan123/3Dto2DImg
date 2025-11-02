@@ -96,6 +96,18 @@ class ConfigLoader:
         """カメラの回転速度を取得"""
         return self.get('camera.rotation_speed', 5.0)
     
+    def get_mouse_drag_sensitivity(self) -> float:
+        """ホイールドラッグの感度を取得"""
+        return self.get('camera.mouse_drag.sensitivity', 2.0)
+    
+    def get_mouse_drag_invert_x(self) -> bool:
+        """ホイールドラッグのX軸反転設定を取得"""
+        return self.get('camera.mouse_drag.invert_x', False)
+    
+    def get_mouse_drag_invert_y(self) -> bool:
+        """ホイールドラッグのY軸反転設定を取得"""
+        return self.get('camera.mouse_drag.invert_y', False)
+    
     # 部屋設定
     def get_room_dimensions(self) -> Tuple[float, float, float]:
         """部屋のサイズを取得"""

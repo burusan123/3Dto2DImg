@@ -181,6 +181,9 @@ designer.run()
 - `camera.initial_rotation`: カメラの初期回転 (roll, pitch, yaw)
 - `camera.movement_speed`: カメラ移動速度
 - `camera.rotation_speed`: カメラ回転速度
+- `camera.mouse_drag.sensitivity`: ホイールドラッグの感度
+- `camera.mouse_drag.invert_x`: X軸の反転（true/false）
+- `camera.mouse_drag.invert_y`: Y軸の反転（true/false）
 
 #### 部屋設定
 - `room.width`: 部屋の幅
@@ -198,6 +201,29 @@ designer.run()
 #### UI設定
 - `ui.instructions`: 操作説明の表示設定
 - `ui.zoom_display`: ズームレベル表示設定
+
+#### ホイールドラッグ設定の詳細
+
+マウス中ボタンでのカメラパン（移動）の動作をカスタマイズできます：
+
+```yaml
+camera:
+  mouse_drag:
+    sensitivity: 2.0  # ドラッグの感度（大きいほど敏感）
+    invert_x: false   # X軸を反転
+    invert_y: false   # Y軸を反転
+```
+
+**設定パラメータ:**
+- `sensitivity`: マウス移動量に対するカメラ移動量の倍率（デフォルト: 2.0）
+  - 大きくすると少しのマウス移動で大きくカメラが動く
+  - 小さくすると精密な操作が可能
+- `invert_x`: X軸（左右）の反転
+  - `false` (デフォルト): マウス右 → カメラ右、マウス左 → カメラ左
+  - `true`: マウス右 → カメラ左、マウス左 → カメラ右
+- `invert_y`: Y軸（前後）の反転
+  - `false` (デフォルト): マウス下 → カメラ後退、マウス上 → カメラ前進
+  - `true`: マウス下 → カメラ前進、マウス上 → カメラ後退
 
 ### 設定例
 

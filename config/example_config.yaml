@@ -25,6 +25,12 @@ camera:
   
   movement_speed: 15
   rotation_speed: 10
+  
+  # ホイールドラッグ設定の例
+  mouse_drag:
+    sensitivity: 3.0   # より敏感な設定
+    invert_x: false    # X軸は反転しない
+    invert_y: false    # Y軸は反転しない
 
 # 部屋設定
 room:
