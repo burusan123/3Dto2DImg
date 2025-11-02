@@ -38,45 +38,96 @@ class Tranceform3D2D:
 
     def set_external_parameter(self, roll: float, pitch: float, yaw: float, tx: float, ty: float, tz: float):
         """
-        外部パラメータを設定する
+        外部パラメータを設定する（カメラの位置と姿勢）
         
-        :param roll: ロール角（度）
-        :param pitch: ピッチ角（度）
-        :param yaw: ヨー角（度）
-        :param tx: x軸の並進
-        :param ty: y軸の並進
-        :param tz: z軸の並進
+        【座標系の定義】
+        ワールド座標系（右手座標系）:
+          - X軸: 右方向
+          - Y軸: 前方向（奥行き）
+          - Z軸: 上方向（高さ）
+        
+        【カメラの初期姿勢】（roll=0, pitch=0, yaw=0の時）
+          - カメラはZ軸の正の方向を向く（上を見ている）
+          - カメラの上方向はY軸の負の方向
+        
+        【回転の適用順序】
+          R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
+          1. roll:  X軸周りの回転（カメラを傾ける、上下を見る動き）
+          2. pitch: Y軸周りの回転（左右を向く動き）
+          3. yaw:   Z軸周りの回転（水平面での回転）
+        
+        【トップビューの実現】
+          位置: (x, y, z) = (部屋の中心X, 部屋の中心Y, 高いZ座標)
+          姿勢: roll=180, pitch=0, yaw=0
+          説明: X軸周りに180度回転することで、カメラが真下を向く
+        
+        :param roll: X軸周りの回転角（度）180度で真下を向く
+        :param pitch: Y軸周りの回転角（度）
+        :param yaw: Z軸周りの回転角（度）
+        :param tx: カメラのX座標
+        :param ty: カメラのY座標
+        :param tz: カメラのZ座標（高さ）
         """
-        # 回転行列の計算
-        Rx = self._rotation_matrix(roll, 0)
-        Ry = self._rotation_matrix(pitch, 1)
-        Rz = self._rotation_matrix(yaw, 2)
-        self._R = Rz @ Ry @ Rx
-        self._t = np.array([tx, ty, tz])
+        # 回転行列の計算（オイラー角からの変換）
+        Rx = self._rotation_matrix(roll, 0)   # X軸周りの回転
+        Ry = self._rotation_matrix(pitch, 1)  # Y軸周りの回転
+        Rz = self._rotation_matrix(yaw, 2)    # Z軸周りの回転
+        self._R = Rz @ Ry @ Rx  # 回転の合成（右から順に適用）
+        self._t = np.array([tx, ty, tz])  # カメラの位置（並進ベクトル）
 
     @staticmethod
     def _rotation_matrix(angle: float, axis: int) -> np.ndarray:
         """
-        回転行列を生成する
+        回転行列を生成する（右手座標系）
+        
+        【各軸周りの回転行列】
+        - X軸周り（roll）:  Y-Z平面での回転（上下を見る動き）
+        - Y軸周り（pitch）: Z-X平面での回転（左右を向く動き）
+        - Z軸周り（yaw）:   X-Y平面での回転（水平面での回転）
+        
+        【回転の方向】
+        正の角度: 右手の法則に従った反時計回り
+        各軸の正の方向に向かって見たときに反時計回りが正の回転
         
         :param angle: 回転角（度）
-        :param axis: 回転軸（0: x, 1: y, 2: z）
-        :return: 回転行列
+        :param axis: 回転軸（0: X軸, 1: Y軸, 2: Z軸）
+        :return: 3x3の回転行列
         """
         rad = math.radians(angle)
         c, s = math.cos(rad), math.sin(rad)
-        if axis == 0:  # X axis
-            return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
-        elif axis == 1:  # Y axis
-            return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
-        elif axis == 2:  # Z axis
-            return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+        
+        if axis == 0:  # X軸周りの回転（roll）
+            # Y -> Z の回転（正: Y軸がZ軸方向へ）
+            return np.array([
+                [1,  0,  0],
+                [0,  c, -s],
+                [0,  s,  c]
+            ])
+        elif axis == 1:  # Y軸周りの回転（pitch）
+            # Z -> X の回転（正: Z軸がX軸方向へ）
+            return np.array([
+                [ c,  0,  s],
+                [ 0,  1,  0],
+                [-s,  0,  c]
+            ])
+        elif axis == 2:  # Z軸周りの回転（yaw）
+            # X -> Y の回転（正: X軸がY軸方向へ）
+            return np.array([
+                [c, -s,  0],
+                [s,  c,  0],
+                [0,  0,  1]
+            ])
         else:
-            raise ValueError("Invalid axis. Must be 0, 1, or 2.")
+            raise ValueError("Invalid axis. Must be 0 (X), 1 (Y), or 2 (Z).")
 
     def cvt_3d_to_2d(self, x: float, y: float, z: float) -> Tuple[int, int]:
         """
         3D座標を2D座標に変換する
+        
+        【変換の流れ】
+        1. ワールド座標系の点からカメラ位置への相対位置を計算
+        2. 回転行列を適用してカメラ座標系に変換
+        3. 透視投影でスクリーン座標に変換
         
         :param x: 3D空間のx座標
         :param y: 3D空間のy座標
@@ -84,7 +135,9 @@ class Tranceform3D2D:
         :return: 2D画像上の(x, y)座標
         """
         point_3d = np.array([x, y, z])
-        point_camera = self._R @ point_3d + self._t
+        # ワールド座標 -> カメラ座標（カメラ位置を原点とした相対座標に変換してから回転）
+        point_camera = self._R @ (point_3d - self._t)
+        # 透視投影（カメラ座標のZ > 0 が前方）
         x_2d = self._fx * point_camera[0] / point_camera[2] + self._cx
         y_2d = self._fy * point_camera[1] / point_camera[2] + self._cy
         return int(x_2d), int(y_2d)
@@ -93,13 +146,20 @@ class Tranceform3D2D:
         """
         3D座標を2D座標に変換し、深度情報も返す
         
+        【変換の流れ】
+        1. ワールド座標系の点からカメラ位置への相対位置を計算
+        2. 回転行列を適用してカメラ座標系に変換
+        3. 深度（カメラからの距離）を計算
+        4. 透視投影でスクリーン座標に変換
+        
         :param x: 3D空間のx座標
         :param y: 3D空間のy座標
         :param z: 3D空間のz座標
         :return: 2D画像上の(x, y)座標とカメラ座標系でのz値（深度）
         """
         point_3d = np.array([x, y, z])
-        point_camera = self._R @ point_3d + self._t
+        # ワールド座標 -> カメラ座標
+        point_camera = self._R @ (point_3d - self._t)
         depth = point_camera[2]
         
         # 深度が正の場合のみ投影計算

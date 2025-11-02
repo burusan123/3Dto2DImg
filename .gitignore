@@ -1,2 +1,8 @@
 venv
+debug/
+
 __pycache__
+# 家具配置の自動保存ファイル
+furniture_layout.json
+# 座標エクスポートファイル
+room_design_*.json

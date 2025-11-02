@@ -59,6 +59,15 @@ class ConfigLoader:
         height = self.get('window.height', 720)
         return width, height
     
+    # アプリケーション設定
+    def get_furniture_layout_file(self) -> str:
+        """家具配置の保存ファイル名を取得"""
+        return self.get('application.furniture_layout_file', 'furniture_layout.json')
+    
+    def get_auto_save_layout(self) -> bool:
+        """自動保存が有効かを取得"""
+        return self.get('application.auto_save_layout', True)
+    
     # カメラ設定
     def get_camera_focal_length(self) -> float:
         """カメラの初期焦点距離を取得"""
@@ -160,6 +169,20 @@ class ConfigLoader:
             'color': tuple(self.get('ui.zoom_display.color', [0, 255, 255])),
             'thickness': self.get('ui.zoom_display.thickness', 2),
             'position': tuple(self.get('ui.zoom_display.position', [10, -20]))
+        }
+    
+    def get_top_view_config(self) -> Dict[str, Any]:
+        """平面図表示設定を取得"""
+        return {
+            'enabled': self.get('ui.top_view.enabled', True),
+            'size': self.get('ui.top_view.size', 600),
+            'margin': self.get('ui.top_view.margin', 50),
+            'background_color': tuple(self.get('ui.top_view.background_color', [255, 255, 255])),
+            'room_color': tuple(self.get('ui.top_view.room_color', [100, 100, 100])),
+            'camera_color': tuple(self.get('ui.top_view.camera_color', [0, 0, 255])),
+            'view_direction_color': tuple(self.get('ui.top_view.view_direction_color', [255, 0, 0])),
+            'fov_color': tuple(self.get('ui.top_view.fov_color', [255, 100, 100])),
+            'selected_color': tuple(self.get('ui.top_view.selected_color', [0, 200, 200]))
         }
     
     # 座標精度設定

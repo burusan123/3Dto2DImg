@@ -289,7 +289,9 @@ class RoomDesigner:
         # カメラの初期位置と回転
         self.camera_x, self.camera_y, self.camera_z = self.config.get_camera_initial_position()
         roll, pitch, yaw = self.config.get_camera_initial_rotation()
-        self.camera_pitch = pitch  # 現在はpitchのみ使用
+        self.camera_roll = roll    # X軸周りの回転（上下を見る）
+        self.camera_pitch = pitch  # Y軸周りの回転（左右を向く）
+        self.camera_yaw = yaw      # Z軸周りの回転（水平回転）
         
         # カメラの移動・回転速度
         self.movement_speed = self.config.get_camera_movement_speed()
@@ -303,6 +305,11 @@ class RoomDesigner:
         # UI設定
         self.instructions_config = self.config.get_instructions_config()
         self.zoom_display_config = self.config.get_zoom_display_config()
+        self.top_view_config = self.config.get_top_view_config()
+        
+        # アプリケーション設定
+        self.furniture_layout_file = self.config.get_furniture_layout_file()
+        self.auto_save_layout = self.config.get_auto_save_layout()
         
         # 座標精度設定
         self.precision = CoordinatePrecision(
@@ -349,10 +356,18 @@ class RoomDesigner:
                 color=furniture_data['color']
             )
             self.room.add_furniture(furniture)
+        
+        # 保存された配置があれば読み込む
+        self._load_furniture_layout()
 
     def run(self):
         """メインループ"""
         cv2.namedWindow("3D Room Designer")
+        
+        # 平面図が有効な場合はウィンドウを作成
+        if self.top_view_config['enabled']:
+            cv2.namedWindow("Top View")
+        
         # マウスイベントのコールバックを設定
         cv2.setMouseCallback("3D Room Designer", self._mouse_callback)
 
@@ -362,8 +377,15 @@ class RoomDesigner:
             # ズーム（焦点距離）を適用
             self.transform.set_focal_length(self.focal_length, self.focal_length)
             
-            # カメラの位置と角度を設定
-            self.transform.set_external_parameter(0, self.camera_pitch, 0, self.camera_x, self.camera_y, self.camera_z)
+            # カメラの位置と角度を設定（roll, pitch, yawを全て使用）
+            self.transform.set_external_parameter(
+                self.camera_roll, 
+                self.camera_pitch, 
+                self.camera_yaw, 
+                self.camera_x, 
+                self.camera_y, 
+                self.camera_z
+            )
 
             # 部屋と家具を描画
             self.room.draw(img, self.transform)
@@ -396,10 +418,19 @@ class RoomDesigner:
                            0.6, (0, 255, 255), 2, cv2.LINE_AA)
 
             cv2.imshow("3D Room Designer", img)
+            
+            # 平面図を描画して表示（有効な場合のみ）
+            if self.top_view_config['enabled']:
+                top_view_img = self._draw_top_view()
+                cv2.imshow("Top View", top_view_img)
 
             if self._handle_input():
                 break
 
+        # 終了時に家具の配置を保存（自動保存が有効な場合）
+        if self.auto_save_layout:
+            self._save_furniture_layout()
+        
         cv2.destroyAllWindows()
     
     def _mouse_callback(self, event, x, y, flags, param):
@@ -489,6 +520,18 @@ class RoomDesigner:
         elif event == cv2.EVENT_MBUTTONUP:
             # ホイールボタン解放: カメラドラッグ終了
             self.camera_dragging = False
+        
+        elif event == cv2.EVENT_MOUSEWHEEL:
+            # ホイール回転: ズームイン/アウト
+            # flagsの上位16ビットにホイールの回転量が格納されている
+            # 正の値: 上方向（ズームイン）、負の値: 下方向（ズームアウト）
+            delta = flags >> 16
+            if delta > 0:
+                # ズームイン
+                self.focal_length = min(self.focal_length + self.zoom_step, self.max_focal_length)
+            else:
+                # ズームアウト
+                self.focal_length = max(self.focal_length - self.zoom_step, self.min_focal_length)
     
     def _screen_to_world(self, screen_x: int, screen_y: int) -> Optional[Tuple[float, float]]:
         """
@@ -498,10 +541,6 @@ class RoomDesigner:
         :param screen_y: 画面上のy座標
         :return: ワールド座標(x, y)、変換できない場合はNone
         """
-        # カメラパラメータを取得
-        point_3d = np.array([0, 0, 0])
-        point_camera = self.transform._R @ point_3d + self.transform._t
-        
         # 画面座標から正規化座標へ
         fx, fy = self.transform.get_focal_length()
         cx, cy = self.center_x, self.center_y
@@ -514,11 +553,11 @@ class RoomDesigner:
         
         # カメラ座標系からワールド座標系へ
         ray_camera = np.array([ray_x, ray_y, ray_z])
-        R_inv = self.transform._R.T
+        R_inv = self.transform._R.T  # 回転行列の逆行列（転置）
         ray_world = R_inv @ ray_camera
         
         # カメラの位置（ワールド座標系）
-        camera_pos = -R_inv @ self.transform._t
+        camera_pos = self.transform._t
         
         # 床面（z=0）との交点を計算
         if abs(ray_world[2]) > 0.001:  # ゼロ除算を避ける
@@ -536,7 +575,7 @@ class RoomDesigner:
             "A/D: Move Left/Right",
             "Q/E: Rotate View",
             "R/F: Move Up/Down",
-            "Z/X: Zoom In/Out",
+            "Z/X or Wheel: Zoom In/Out",
             "Mouse Left: Drag furniture",
             "Mouse Middle: Pan camera",
             "P: Export coordinates",
@@ -586,6 +625,16 @@ class RoomDesigner:
         
         :return: プログラムを終了するかどうか
         """
+        # ウィンドウが閉じられたかをチェック
+        # getWindowProperty()が-1を返す場合、ウィンドウが閉じられている
+        if cv2.getWindowProperty("3D Room Designer", cv2.WND_PROP_VISIBLE) < 1:
+            return True
+        
+        # Top Viewウィンドウが有効な場合、そちらもチェック
+        if self.top_view_config['enabled']:
+            if cv2.getWindowProperty("Top View", cv2.WND_PROP_VISIBLE) < 1:
+                return True
+        
         key = cv2.waitKey(1) & 0xFF
         if key == 27:  # Esc key
             return True
@@ -661,6 +710,210 @@ class RoomDesigner:
         
         print(f"座標データをエクスポートしました: {filename}")
         print(f"精度: {self.precision.get_precision_display_name()}, 単位: {self.precision.unit_system.value}")
+    
+    def _save_furniture_layout(self):
+        """
+        終了時に家具の配置を保存する
+        """
+        import json
+        from datetime import datetime
+        
+        # 設定ファイルから保存ファイル名を取得
+        save_file = self.furniture_layout_file
+        
+        # 保存データを構築
+        save_data = {
+            "last_saved": datetime.now().isoformat(),
+            "furnitures": []
+        }
+        
+        # 各家具の位置情報を保存
+        for furniture in self.room.furnitures:
+            furniture_data = {
+                "name": furniture.name,
+                "x": furniture.x,
+                "y": furniture.y,
+                "z": furniture.z,
+                "width": furniture.width,
+                "height": furniture.height,
+                "depth": furniture.depth,
+                "color": list(furniture.color)  # タプルをリストに変換
+            }
+            save_data["furnitures"].append(furniture_data)
+        
+        # ファイルに保存
+        try:
+            with open(save_file, 'w', encoding='utf-8') as f:
+                json.dump(save_data, f, indent=2, ensure_ascii=False)
+            print(f"家具の配置を保存しました: {save_file}")
+        except Exception as e:
+            print(f"配置の保存に失敗しました: {e}")
+    
+    def _load_furniture_layout(self):
+        """
+        起動時に保存された家具の配置を読み込む
+        """
+        import json
+        import os
+        
+        # 設定ファイルから保存ファイル名を取得
+        save_file = self.furniture_layout_file
+        
+        # ファイルが存在しない場合は何もしない
+        if not os.path.exists(save_file):
+            return
+        
+        try:
+            with open(save_file, 'r', encoding='utf-8') as f:
+                save_data = json.load(f)
+            
+            # 保存された家具データを読み込む
+            saved_furnitures = save_data.get("furnitures", [])
+            
+            # 既存の家具と保存された家具を名前でマッチング
+            for saved_furn in saved_furnitures:
+                # 同じ名前の家具を探す
+                for furniture in self.room.furnitures:
+                    if furniture.name == saved_furn["name"]:
+                        # 位置を復元
+                        furniture.x = saved_furn["x"]
+                        furniture.y = saved_furn["y"]
+                        furniture.z = saved_furn["z"]
+                        # サイズも復元（変更されている可能性があるため）
+                        furniture.width = saved_furn["width"]
+                        furniture.height = saved_furn["height"]
+                        furniture.depth = saved_furn["depth"]
+                        # 色も復元
+                        furniture.color = tuple(saved_furn["color"])
+                        break
+            
+            print(f"家具の配置を読み込みました: {save_file}")
+            print(f"最終保存日時: {save_data.get('last_saved', '不明')}")
+        except Exception as e:
+            print(f"配置の読み込みに失敗しました: {e}")
+    
+    def _draw_top_view(self) -> np.ndarray:
+        """
+        上からの投影図（平面図）を描画する
+        
+        :return: 平面図の画像
+        """
+        # 設定から値を取得
+        config = self.top_view_config
+        view_size = config['size']
+        margin = config['margin']
+        bg_color = config['background_color']
+        room_color = config['room_color']
+        camera_color = config['camera_color']
+        view_dir_color = config['view_direction_color']
+        fov_color = config['fov_color']
+        selected_color = config['selected_color']
+        
+        # 画像を作成
+        top_view_img = np.ones((view_size, view_size, 3), dtype=np.uint8) * np.array(bg_color, dtype=np.uint8)
+        
+        # 部屋のサイズに応じてスケールを計算
+        scale_x = (view_size - 2 * margin) / self.room.width
+        scale_y = (view_size - 2 * margin) / self.room.depth
+        scale = min(scale_x, scale_y)
+        
+        # 座標変換関数
+        # 注: roll=180でカメラが真下を見る場合、3DビューではX軸が反転しないが
+        # Y軸が反転する。Top Viewでは分かりやすくするため、3Dビューと同じ向きにする
+        def world_to_screen(x, y):
+            # X軸はそのまま、Y軸を反転させる（画面座標系では下が正なので）
+            screen_x = int(margin + x * scale)
+            screen_y = int(view_size - margin - y * scale)  # Y軸を反転
+            return screen_x, screen_y
+        
+        # 部屋の輪郭を描画
+        room_corners = [
+            (0, 0),
+            (self.room.width, 0),
+            (self.room.width, self.room.depth),
+            (0, self.room.depth)
+        ]
+        
+        for i in range(4):
+            p1 = world_to_screen(*room_corners[i])
+            p2 = world_to_screen(*room_corners[(i + 1) % 4])
+            cv2.line(top_view_img, p1, p2, room_color, 2)
+        
+        # 家具を描画
+        for furniture in self.room.furnitures:
+            # 家具の4隅
+            corners = [
+                (furniture.x, furniture.y),
+                (furniture.x + furniture.width, furniture.y),
+                (furniture.x + furniture.width, furniture.y + furniture.depth),
+                (furniture.x, furniture.y + furniture.depth)
+            ]
+            
+            # 家具の輪郭を描画
+            line_thickness = 3 if furniture.is_selected else 2
+            line_color = selected_color if furniture.is_selected else furniture.color
+            
+            for i in range(4):
+                p1 = world_to_screen(*corners[i])
+                p2 = world_to_screen(*corners[(i + 1) % 4])
+                cv2.line(top_view_img, p1, p2, line_color, line_thickness)
+            
+            # 家具を塗りつぶす（半透明）
+            pts = np.array([world_to_screen(*c) for c in corners], dtype=np.int32)
+            overlay = top_view_img.copy()
+            cv2.fillPoly(overlay, [pts], furniture.color)
+            cv2.addWeighted(overlay, 0.3, top_view_img, 0.7, 0, top_view_img)
+            
+            # 家具の名前を表示
+            center = world_to_screen(
+                furniture.x + furniture.width / 2,
+                furniture.y + furniture.depth / 2
+            )
+            text_color = (0, 0, 0)
+            cv2.putText(top_view_img, furniture.name, center, cv2.FONT_HERSHEY_SIMPLEX, 
+                       0.4, text_color, 1, cv2.LINE_AA)
+        
+        # カメラの位置と視線方向を描画
+        camera_pos = world_to_screen(self.camera_x, self.camera_y)
+        
+        # カメラ位置を円で表示
+        cv2.circle(top_view_img, camera_pos, 8, camera_color, -1)
+        cv2.circle(top_view_img, camera_pos, 10, camera_color, 2)
+        
+        # 視線方向を矢印で表示（pitch角を考慮して前方向）
+        view_direction_length = 40
+        # camera_pitchが正の時は下向き、負の時は上向きを見ているが、
+        # 平面図では常にY軸正方向を前方として表示
+        view_end_x = camera_pos[0]
+        view_end_y = camera_pos[1] + int(view_direction_length)
+        cv2.arrowedLine(top_view_img, camera_pos, (view_end_x, view_end_y), 
+                       view_dir_color, 2, tipLength=0.3)
+        
+        # カメラの視野角を描画（FOV）
+        fov_angle = 60  # 視野角（度）
+        fov_length = 80
+        fov_angle_rad = np.radians(fov_angle / 2)
+        
+        # 左側の視野線
+        left_x = camera_pos[0] + int(fov_length * np.sin(-fov_angle_rad))
+        left_y = camera_pos[1] + int(fov_length * np.cos(-fov_angle_rad))
+        cv2.line(top_view_img, camera_pos, (left_x, left_y), fov_color, 1)
+        
+        # 右側の視野線
+        right_x = camera_pos[0] + int(fov_length * np.sin(fov_angle_rad))
+        right_y = camera_pos[1] + int(fov_length * np.cos(fov_angle_rad))
+        cv2.line(top_view_img, camera_pos, (right_x, right_y), fov_color, 1)
+        
+        # タイトルを表示
+        cv2.putText(top_view_img, "Top View (Floor Plan)", (10, 25), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2, cv2.LINE_AA)
+        
+        # カメラ情報を表示
+        cam_info = f"Camera: ({self.camera_x:.0f}, {self.camera_y:.0f}, {self.camera_z:.0f})"
+        cv2.putText(top_view_img, cam_info, (10, view_size - 10), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1, cv2.LINE_AA)
+        
+        return top_view_img
 
 if __name__ == "__main__":
     designer = RoomDesigner()
