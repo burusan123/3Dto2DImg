@@ -35,6 +35,14 @@ class Tranceform3D2D:
         :return: (fx, fy)のタプル
         """
         return self._fx, self._fy
+    
+    def get_camera_position(self) -> Tuple[float, float, float]:
+        """
+        カメラのワールド座標位置を取得する
+        
+        :return: (x, y, z)のタプル
+        """
+        return tuple(self._t)
 
     def set_external_parameter(self, roll: float, pitch: float, yaw: float, tx: float, ty: float, tz: float):
         """

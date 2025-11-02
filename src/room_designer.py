@@ -146,44 +146,101 @@ class Furniture(Drawable):
         else:
             return f"{self.name}: ({self.x:.2f}, {self.y:.2f}, {self.z:.2f})"
 
-    def draw(self, img: np.ndarray, transform: Tranceform3D2D):
-        """家具を画像に描画する"""
-        vertices = self.get_vertices()
-        edges = [
-            (0, 1), (1, 2), (2, 3), (3, 0),
-            (4, 5), (5, 6), (6, 7), (7, 4),
-            (0, 4), (1, 5), (2, 6), (3, 7)
-        ]
+    def get_faces(self) -> List[Tuple[List[int], Tuple[float, float, float]]]:
+        """
+        家具の面を取得する（頂点インデックスと法線ベクトル）
         
+        頂点インデックス:
+          0-3: 底面 (Z=z)
+          4-7: 上面 (Z=z+height)
+        
+        :return: [(頂点インデックスリスト, 法線ベクトル), ...]
+        """
+        return [
+            # 底面（下向き: -Z）
+            ([0, 3, 2, 1], (0, 0, -1)),
+            # 上面（上向き: +Z）
+            ([4, 5, 6, 7], (0, 0, 1)),
+            # 前面（-X方向を向く）
+            ([0, 1, 5, 4], (-1, 0, 0)),
+            # 後面（+X方向を向く）
+            ([2, 3, 7, 6], (1, 0, 0)),
+            # 左面（-Y方向を向く）
+            ([0, 4, 7, 3], (0, -1, 0)),
+            # 右面（+Y方向を向く）
+            ([1, 2, 6, 5], (0, 1, 0)),
+        ]
+    
+    def draw(self, img: np.ndarray, transform: Tranceform3D2D):
+        """家具を画像に描画する（面を考慮）"""
+        vertices = self.get_vertices()
         img_height, img_width = img.shape[:2]
         
-        # 選択状態に応じて色と線の太さを変更
-        line_color = (255, 255, 0) if self.is_selected else self.color  # 選択時は黄色
-        line_thickness = 3 if self.is_selected else 2
+        # カメラ位置を取得
+        camera_pos = transform.get_camera_position()
         
-        for edge in edges:
-            # 線分のクリッピングを使用
-            result = transform.clip_line_to_screen(
-                vertices[edge[0]], 
-                vertices[edge[1]], 
-                img_width, 
-                img_height
-            )
+        # 面を描画（バックフェースカリングと深度ソート）
+        faces_with_depth = []
+        
+        for face_indices, normal in self.get_faces():
+            # 面の中心点を計算
+            face_center = np.mean([vertices[i] for i in face_indices], axis=0)
             
-            # 描画可能な場合のみ描画
-            if result is not None:
-                start, end = result
-                cv2.line(img, start, end, line_color, line_thickness)
+            # カメラから面への方向ベクトル
+            view_vector = np.array(face_center) - np.array(camera_pos)
+            
+            # バックフェースカリング（法線とビューベクトルの内積）
+            if np.dot(normal, view_vector) < 0:
+                # 裏面なので描画しない
+                continue
+            
+            # 深度を計算（カメラからの距離）
+            _, _, depth = transform.cvt_3d_to_2d_with_depth(*face_center)
+            if depth > 0:  # カメラの前にある面のみ
+                faces_with_depth.append((face_indices, depth))
+        
+        # 深度でソート（遠い順に描画）
+        faces_with_depth.sort(key=lambda x: x[1], reverse=True)
+        
+        # 選択状態に応じて色を変更
+        face_color = (255, 255, 0) if self.is_selected else self.color
+        
+        # 面を描画
+        for face_indices, _ in faces_with_depth:
+            # 2D座標に変換
+            points_2d = []
+            all_visible = True
+            for idx in face_indices:
+                if transform.is_point_visible(*vertices[idx], img_width, img_height):
+                    pt = transform.cvt_3d_to_2d(*vertices[idx])
+                    points_2d.append(pt)
+                else:
+                    all_visible = False
+                    break
+            
+            # すべての頂点が可視の場合のみ描画
+            if all_visible and len(points_2d) >= 3:
+                pts = np.array(points_2d, dtype=np.int32)
+                
+                # 面を塗りつぶし（半透明）
+                overlay = img.copy()
+                cv2.fillPoly(overlay, [pts], face_color)
+                cv2.addWeighted(overlay, 0.4, img, 0.6, 0, img)
+                
+                # 輪郭線を描画
+                line_color = (255, 255, 255) if self.is_selected else (50, 50, 50)
+                line_thickness = 2 if self.is_selected else 1
+                cv2.polylines(img, [pts], isClosed=True, color=line_color, thickness=line_thickness)
 
         # 家具の名前を表示（中心点が可視の場合のみ）
-        center_x = self.x + self.width / 2
-        center_y = self.y + self.depth / 2
+        center_x = self.x + self.depth / 2
+        center_y = self.y + self.width / 2
         center_z = self.z + self.height
         
         if transform.is_point_visible(center_x, center_y, center_z, img_width, img_height):
             center = transform.cvt_3d_to_2d(center_x, center_y, center_z)
-            text_color = (255, 255, 0) if self.is_selected else (255, 255, 255)
-            cv2.putText(img, self.name, center, cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1, cv2.LINE_AA)
+            text_color = (0, 0, 0) if self.is_selected else (255, 255, 255)
+            cv2.putText(img, self.name, center, cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 2, cv2.LINE_AA)
 
 class Room:
     """部屋クラス"""
@@ -271,39 +328,107 @@ class Room:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
     def draw(self, img: np.ndarray, transform: Tranceform3D2D):
-        """部屋と家具を画像に描画する"""
+        """部屋と家具を画像に描画する（面を考慮）"""
         img_height, img_width = img.shape[:2]
         
         # 座標軸を描画（原点から）
         self.draw_axes(img, transform, origin=(0, 0, 0), length=150)
         
-        # 部屋の輪郭を描画
+        # カメラ位置を取得
+        camera_pos = transform.get_camera_position()
+        
+        # 部屋の面を定義（UE5スタイル: X=前、Y=右、Z=上）
         vertices = [
-            (0, 0, 0), (self.width, 0, 0), (self.width, self.depth, 0), (0, self.depth, 0),
-            (0, 0, self.height), (self.width, 0, self.height), (self.width, self.depth, self.height), (0, self.depth, self.height)
-        ]
-        edges = [
-            (0, 1), (1, 2), (2, 3), (3, 0),
-            (4, 5), (5, 6), (6, 7), (7, 4),
-            (0, 4), (1, 5), (2, 6), (3, 7)
+            (0, 0, 0),                      # 0: 原点
+            (self.depth, 0, 0),             # 1: X方向（前）
+            (self.depth, self.width, 0),    # 2: X,Y方向
+            (0, self.width, 0),             # 3: Y方向（右）
+            (0, 0, self.height),            # 4: Z方向（上）
+            (self.depth, 0, self.height),   # 5: X,Z方向
+            (self.depth, self.width, self.height),  # 6: X,Y,Z方向
+            (0, self.width, self.height),   # 7: Y,Z方向
         ]
         
-        for edge in edges:
-            # 線分のクリッピングを使用
-            result = transform.clip_line_to_screen(
-                vertices[edge[0]], 
-                vertices[edge[1]], 
-                img_width, 
-                img_height
-            )
+        # 部屋の面（内側を向く法線）
+        room_faces = [
+            # 床（上向き: +Z）
+            ([0, 1, 2, 3], (0, 0, 1)),
+            # 天井（下向き: -Z）
+            ([4, 7, 6, 5], (0, 0, -1)),
+            # 前壁（-X方向）
+            ([0, 3, 7, 4], (-1, 0, 0)),
+            # 後壁（+X方向）
+            ([1, 5, 6, 2], (1, 0, 0)),
+            # 左壁（-Y方向）
+            ([0, 4, 5, 1], (0, -1, 0)),
+            # 右壁（+Y方向）
+            ([3, 2, 6, 7], (0, 1, 0)),
+        ]
+        
+        # 部屋の面を描画（バックフェースカリングと深度ソート）
+        room_faces_with_depth = []
+        
+        for face_indices, normal in room_faces:
+            # 面の中心点を計算
+            face_center = np.mean([vertices[i] for i in face_indices], axis=0)
             
-            # 描画可能な場合のみ描画
-            if result is not None:
-                start, end = result
-                cv2.line(img, start, end, self.color, 1)
-
-        # 家具を描画
+            # カメラから面への方向ベクトル
+            view_vector = np.array(face_center) - np.array(camera_pos)
+            
+            # バックフェースカリング（部屋は内側なので逆）
+            if np.dot(normal, view_vector) > 0:
+                # 外側を向いているので描画しない
+                continue
+            
+            # 深度を計算
+            _, _, depth = transform.cvt_3d_to_2d_with_depth(*face_center)
+            if depth > 0:
+                room_faces_with_depth.append((face_indices, depth))
+        
+        # 深度でソート（遠い順に描画）
+        room_faces_with_depth.sort(key=lambda x: x[1], reverse=True)
+        
+        # 部屋の面を描画（半透明の壁）
+        room_color = (100, 100, 100)
+        for face_indices, _ in room_faces_with_depth:
+            # 2D座標に変換
+            points_2d = []
+            all_visible = True
+            for idx in face_indices:
+                if transform.is_point_visible(*vertices[idx], img_width, img_height):
+                    pt = transform.cvt_3d_to_2d(*vertices[idx])
+                    points_2d.append(pt)
+                else:
+                    all_visible = False
+                    break
+            
+            # すべての頂点が可視の場合のみ描画
+            if all_visible and len(points_2d) >= 3:
+                pts = np.array(points_2d, dtype=np.int32)
+                
+                # 面を塗りつぶし（薄い半透明）
+                overlay = img.copy()
+                cv2.fillPoly(overlay, [pts], room_color)
+                cv2.addWeighted(overlay, 0.1, img, 0.9, 0, img)
+                
+                # 輪郭線を描画
+                cv2.polylines(img, [pts], isClosed=True, color=self.color, thickness=1)
+        
+        # 家具を深度順に描画
+        furniture_with_depth = []
         for furniture in self.furnitures:
+            center_x = furniture.x + furniture.depth / 2
+            center_y = furniture.y + furniture.width / 2
+            center_z = furniture.z + furniture.height / 2
+            _, _, depth = transform.cvt_3d_to_2d_with_depth(center_x, center_y, center_z)
+            if depth > 0:
+                furniture_with_depth.append((furniture, depth))
+        
+        # 深度でソート（遠い順に描画）
+        furniture_with_depth.sort(key=lambda x: x[1], reverse=True)
+        
+        # 家具を描画
+        for furniture, _ in furniture_with_depth:
             furniture.draw(img, transform)
 
 class RoomDesigner:
