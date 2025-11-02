@@ -6,6 +6,7 @@ from calc3Dto2D import Tranceform3D2D
 from config_loader import ConfigLoader
 from coordinate_precision import CoordinatePrecision
 from mouse_controller import MouseController
+from keyboard_controller import KeyboardController
 
 class Drawable(ABC):
     """描画可能なオブジェクトの抽象基底クラス"""
@@ -487,6 +488,21 @@ class RoomDesigner:
         }
         self.mouse_controller = MouseController(mouse_config)
         
+        # キーボードコントローラーを初期化
+        keyboard_config = {
+            'movement_speed': self.movement_speed,
+            'rotation_speed': self.rotation_speed,
+            'zoom': {
+                'min_focal_length': self.min_focal_length,
+                'max_focal_length': self.max_focal_length,
+                'zoom_step': self.zoom_step
+            },
+            'min_camera_height': 10,
+            'min_pitch': -89,
+            'max_pitch': 89
+        }
+        self.keyboard_controller = KeyboardController(keyboard_config)
+        
         # 選択中の家具
         self.selected_furniture: Optional[Furniture] = None
         
@@ -721,7 +737,7 @@ class RoomDesigner:
         instructions = [
             "W/S: Move Forward/Backward",
             "A/D: Move Left/Right",
-            "Q/E: Rotate View",
+            "Q/E: Rotate View Left/Right (Yaw)",
             "R/F: Move Up/Down",
             "Z/X or Wheel: Zoom In/Out",
             "Mouse Left: Move forward/back + Yaw (UE5)",
@@ -787,35 +803,34 @@ class RoomDesigner:
             if cv2.getWindowProperty("Top View", cv2.WND_PROP_VISIBLE) < 1:
                 return True
         
-        key = cv2.waitKey(1) & 0xFF
-        if key == 27:  # Esc key
-            return True
-        elif key == ord('w'):
-            self.camera_y += self.movement_speed
-        elif key == ord('s'):
-            self.camera_y -= self.movement_speed
-        elif key == ord('a'):
-            self.camera_x -= self.movement_speed
-        elif key == ord('d'):
-            self.camera_x += self.movement_speed
-        elif key == ord('q'):
-            self.camera_pitch = min(self.camera_pitch + self.rotation_speed, 89)
-        elif key == ord('e'):
-            self.camera_pitch = max(self.camera_pitch - self.rotation_speed, -89)
-        elif key == ord('r'):
-            self.camera_z += self.movement_speed
-        elif key == ord('f'):
-            self.camera_z = max(self.camera_z - self.movement_speed, 10)
-        elif key == ord('z'):
-            # ズームイン（焦点距離を増加）
-            self.focal_length = min(self.focal_length + self.zoom_step, self.max_focal_length)
-        elif key == ord('x'):
-            # ズームアウト（焦点距離を減少）
-            self.focal_length = max(self.focal_length - self.zoom_step, self.min_focal_length)
-        elif key == ord('p'):
-            # 座標データをエクスポート（JSON形式）
-            self._export_coordinates()
-        return False
+        # カメラの現在状態を準備
+        camera_state = {
+            'x': self.camera_x,
+            'y': self.camera_y,
+            'z': self.camera_z,
+            'pitch': self.camera_pitch,
+            'yaw': self.camera_yaw,
+            'roll': self.camera_roll,
+            'focal_length': self.focal_length
+        }
+        
+        # キーボード入力を処理
+        result = self.keyboard_controller.handle_keyboard_input(
+            camera_state,
+            export_callback=self._export_coordinates
+        )
+        
+        # カメラ状態を更新
+        if result['camera_updated']:
+            self.camera_x = result['camera_x']
+            self.camera_y = result['camera_y']
+            self.camera_z = result['camera_z']
+            self.camera_pitch = result['camera_pitch']
+            self.camera_yaw = result['camera_yaw']
+            self.camera_roll = result['camera_roll']
+            self.focal_length = result['focal_length']
+        
+        return result['exit']
     
     def _export_coordinates(self):
         """座標データをエクスポートする（CAD/設計図用）"""
