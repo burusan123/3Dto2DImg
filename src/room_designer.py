@@ -42,22 +42,29 @@ class Furniture(Drawable):
         self.is_selected = False  # 選択状態
 
     def get_vertices(self) -> List[Tuple[float, float, float]]:
-        """家具の頂点座標を取得する"""
+        """
+        家具の頂点座標を取得する（UE5スタイル）
+        
+        座標系: X=前、Y=右、Z=上
+        サイズ: width=幅（Y方向）、depth=奥行き（X方向）、height=高さ（Z方向）
+        """
         return [
+            # 底面の4頂点（Z=self.z）
             (self.x, self.y, self.z),
-            (self.x + self.width, self.y, self.z),
-            (self.x + self.width, self.y + self.depth, self.z),
-            (self.x, self.y + self.depth, self.z),
+            (self.x + self.depth, self.y, self.z),  # X方向にdepth（奥行き）
+            (self.x + self.depth, self.y + self.width, self.z),  # Y方向にwidth（幅）
+            (self.x, self.y + self.width, self.z),
+            # 上面の4頂点（Z=self.z + height）
             (self.x, self.y, self.z + self.height),
-            (self.x + self.width, self.y, self.z + self.height),
-            (self.x + self.width, self.y + self.depth, self.z + self.height),
-            (self.x, self.y + self.depth, self.z + self.height),
+            (self.x + self.depth, self.y, self.z + self.height),
+            (self.x + self.depth, self.y + self.width, self.z + self.height),
+            (self.x, self.y + self.width, self.z + self.height),
         ]
     
     def get_center_2d(self, transform: Tranceform3D2D) -> Tuple[int, int]:
-        """家具の中心の2D座標を取得する"""
-        center_x = self.x + self.width / 2
-        center_y = self.y + self.depth / 2
+        """家具の中心の2D座標を取得する（UE5スタイル）"""
+        center_x = self.x + self.depth / 2  # X方向にdepth/2
+        center_y = self.y + self.width / 2  # Y方向にwidth/2
         center_z = self.z
         return transform.cvt_3d_to_2d(center_x, center_y, center_z)
     
@@ -230,10 +237,45 @@ class Room:
                 return furniture
         
         return None
+    
+    def draw_axes(self, img: np.ndarray, transform: Tranceform3D2D, origin: Tuple[float, float, float] = (0, 0, 0), length: float = 100):
+        """
+        座標軸を描画する（UE5スタイル: X=前/赤、Y=右/緑、Z=上/青）
+        
+        :param img: 描画先の画像
+        :param transform: 座標変換オブジェクト
+        :param origin: 軸の原点座標
+        :param length: 軸の長さ
+        """
+        ox, oy, oz = origin
+        img_height, img_width = img.shape[:2]
+        
+        # 各軸の終点
+        axes = [
+            ("X (Forward)", (ox + length, oy, oz), (0, 0, 255)),     # X軸: 前方向 = 赤
+            ("Y (Right)",   (ox, oy + length, oz), (0, 255, 0)),     # Y軸: 右方向 = 緑
+            ("Z (Up)",      (ox, oy, oz + length), (255, 0, 0)),     # Z軸: 上方向 = 青
+        ]
+        
+        # 各軸を描画
+        for label, end_point, color in axes:
+            result = transform.clip_line_to_screen((ox, oy, oz), end_point, img_width, img_height)
+            if result:
+                p1, p2 = result
+                # 軸を描画（太めの線）
+                cv2.line(img, p1, p2, color, 3, cv2.LINE_AA)
+                # 矢印を描画
+                cv2.arrowedLine(img, p1, p2, color, 3, cv2.LINE_AA, tipLength=0.2)
+                # ラベルを描画
+                cv2.putText(img, label.split()[0], (p2[0] + 10, p2[1]), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
     def draw(self, img: np.ndarray, transform: Tranceform3D2D):
         """部屋と家具を画像に描画する"""
         img_height, img_width = img.shape[:2]
+        
+        # 座標軸を描画（原点から）
+        self.draw_axes(img, transform, origin=(0, 0, 0), length=150)
         
         # 部屋の輪郭を描画
         vertices = [
@@ -302,6 +344,13 @@ class RoomDesigner:
         self.mouse_drag_invert_x = self.config.get_mouse_drag_invert_x()
         self.mouse_drag_invert_y = self.config.get_mouse_drag_invert_y()
         
+        # 右クリックドラッグ（ビュー回転）設定
+        self.mouse_view_rotation_sensitivity = self.config.get_mouse_view_rotation_sensitivity()
+        self.mouse_view_rotation_invert_x = self.config.get_mouse_view_rotation_invert_x()
+        self.mouse_view_rotation_invert_y = self.config.get_mouse_view_rotation_invert_y()
+        self.mouse_view_rotation_min_pitch = self.config.get_mouse_view_rotation_min_pitch()
+        self.mouse_view_rotation_max_pitch = self.config.get_mouse_view_rotation_max_pitch()
+        
         # UI設定
         self.instructions_config = self.config.get_instructions_config()
         self.zoom_display_config = self.config.get_zoom_display_config()
@@ -332,6 +381,13 @@ class RoomDesigner:
         self.camera_drag_start_y = 0
         self.camera_drag_start_cam_x = 0.0
         self.camera_drag_start_cam_y = 0.0
+        
+        # 右クリックドラッグによるカメラビュー回転用の状態
+        self.view_rotating = False
+        self.view_rotation_start_x = 0
+        self.view_rotation_start_y = 0
+        self.view_rotation_start_pitch = 0.0
+        self.view_rotation_start_yaw = 0.0
         
         # 部屋の作成
         room_width, room_depth, room_height = self.config.get_room_dimensions()
@@ -416,6 +472,12 @@ class RoomDesigner:
                 camera_drag_text = "Camera Pan (Middle Button Drag)"
                 cv2.putText(img, camera_drag_text, (10, self.height - 50), cv2.FONT_HERSHEY_SIMPLEX, 
                            0.6, (0, 255, 255), 2, cv2.LINE_AA)
+            
+            # カメラ回転中の情報を表示（デバッグ用）
+            if self.view_rotating:
+                view_rotation_text = f"View Rotation: Pitch={self.camera_pitch:.1f}, Yaw={self.camera_yaw:.1f}, Roll={self.camera_roll:.1f}"
+                cv2.putText(img, view_rotation_text, (10, self.height - 80), cv2.FONT_HERSHEY_SIMPLEX, 
+                           0.6, (255, 0, 255), 2, cv2.LINE_AA)
 
             cv2.imshow("3D Room Designer", img)
             
@@ -509,13 +571,51 @@ class RoomDesigner:
                 x_direction = -1 if self.mouse_drag_invert_x else 1
                 y_direction = -1 if self.mouse_drag_invert_y else 1
                 
-                # カメラ座標を更新（設定に応じた方向）
-                self.camera_x = self.camera_drag_start_cam_x + delta_x * self.mouse_drag_sensitivity * x_direction
-                self.camera_y = self.camera_drag_start_cam_y - delta_y * self.mouse_drag_sensitivity * y_direction
+                # カメラ座標を更新（UE5スタイル: X=前、Y=右）
+                # マウス左右（delta_x） → カメラY座標（右方向）
+                # マウス上下（delta_y） → カメラX座標（前方向）
+                self.camera_y = self.camera_drag_start_cam_y + delta_x * self.mouse_drag_sensitivity * x_direction
+                self.camera_x = self.camera_drag_start_cam_x - delta_y * self.mouse_drag_sensitivity * y_direction
+            
+            elif self.view_rotating:
+                # カメラビューの回転（右クリックドラッグ - UE5スタイル）
+                # マウスの移動量を計算
+                delta_x = x - self.view_rotation_start_x
+                delta_y = y - self.view_rotation_start_y
+                
+                # 設定に基づいて方向を反転
+                x_direction = -1 if self.mouse_view_rotation_invert_x else 1
+                y_direction = -1 if self.mouse_view_rotation_invert_y else 1
+                
+                # マウスの移動量を角度に変換（UE5スタイル）
+                # X方向の移動 -> yaw（水平回転・左右を向く）
+                # Y方向の移動 -> pitch（上下を見る）
+                delta_yaw = delta_x * self.mouse_view_rotation_sensitivity * x_direction
+                delta_pitch = delta_y * self.mouse_view_rotation_sensitivity * y_direction
+                
+                # カメラの向きを更新
+                self.camera_yaw = self.view_rotation_start_yaw + delta_yaw
+                self.camera_pitch = self.view_rotation_start_pitch + delta_pitch
+                
+                # pitch を制限（真下から真上まで）
+                self.camera_pitch = max(self.mouse_view_rotation_min_pitch, 
+                                       min(self.mouse_view_rotation_max_pitch, self.camera_pitch))
         
         elif event == cv2.EVENT_LBUTTONUP:
             # 左クリック解放: ドラッグ終了
             self.dragging = False
+        
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            # 右クリック: カメラビュー回転開始
+            self.view_rotating = True
+            self.view_rotation_start_x = x
+            self.view_rotation_start_y = y
+            self.view_rotation_start_pitch = self.camera_pitch
+            self.view_rotation_start_yaw = self.camera_yaw
+        
+        elif event == cv2.EVENT_RBUTTONUP:
+            # 右クリック解放: カメラビュー回転終了
+            self.view_rotating = False
         
         elif event == cv2.EVENT_MBUTTONUP:
             # ホイールボタン解放: カメラドラッグ終了
@@ -578,6 +678,7 @@ class RoomDesigner:
             "Z/X or Wheel: Zoom In/Out",
             "Mouse Left: Drag furniture",
             "Mouse Middle: Pan camera",
+            "Mouse Right: Rotate view (UE5 style)",
             "P: Export coordinates",
             "Esc: Quit"
         ]
@@ -817,14 +918,78 @@ class RoomDesigner:
         scale_y = (view_size - 2 * margin) / self.room.depth
         scale = min(scale_x, scale_y)
         
-        # 座標変換関数
-        # 注: roll=180でカメラが真下を見る場合、3DビューではX軸が反転しないが
-        # Y軸が反転する。Top Viewでは分かりやすくするため、3Dビューと同じ向きにする
+        # 座標変換関数（UE5スタイル: X=前、Y=右）
+        # 3Dビュー（Pitch=89.5度）の投影に合わせる:
+        #   - X座標が大きい → 画面下（Y大）
+        #   - Y座標が大きい → 画面右（X大）
         def world_to_screen(x, y):
-            # X軸はそのまま、Y軸を反転させる（画面座標系では下が正なので）
-            screen_x = int(margin + x * scale)
-            screen_y = int(view_size - margin - y * scale)  # Y軸を反転
+            # Y軸（右）を画面の横に、X軸（前）を画面の縦にマッピング
+            screen_x = int(margin + y * scale)          # Y軸（右）→ 画面X（横）
+            screen_y = int(margin + x * scale)          # X軸（前）→ 画面Y（縦）
             return screen_x, screen_y
+        
+        # 目盛り（グリッド）を描画
+        grid_config = config['grid']
+        if grid_config['enabled']:
+            grid_interval = grid_config['interval']  # mm単位
+            line_color = grid_config['line_color']
+            line_thickness = grid_config['line_thickness']
+            major_interval = grid_config['major_interval']
+            major_line_thickness = grid_config['major_line_thickness']
+            major_line_color = grid_config['major_line_color']
+            label_color = grid_config['label_color']
+            label_font_scale = grid_config['label_font_scale']
+            label_show = grid_config['label_show']
+            
+            # X軸方向の目盛り
+            x = 0
+            grid_count = 0
+            while x <= self.room.width:
+                is_major = (grid_count % major_interval == 0)
+                color = major_line_color if is_major else line_color
+                thickness = major_line_thickness if is_major else line_thickness
+                
+                # 縦線を描画
+                p1 = world_to_screen(x, 0)
+                p2 = world_to_screen(x, self.room.depth)
+                cv2.line(top_view_img, p1, p2, color, thickness)
+                
+                # ラベルを描画（主目盛りのみ）
+                if label_show and is_major and x > 0:
+                    label = f"{int(x)}"
+                    label_pos = world_to_screen(x, 0)
+                    # ラベルを少し下に配置
+                    label_pos = (label_pos[0] - 10, label_pos[1] + 15)
+                    cv2.putText(top_view_img, label, label_pos, cv2.FONT_HERSHEY_SIMPLEX,
+                               label_font_scale, label_color, 1, cv2.LINE_AA)
+                
+                x += grid_interval
+                grid_count += 1
+            
+            # Y軸方向の目盛り
+            y = 0
+            grid_count = 0
+            while y <= self.room.depth:
+                is_major = (grid_count % major_interval == 0)
+                color = major_line_color if is_major else line_color
+                thickness = major_line_thickness if is_major else line_thickness
+                
+                # 横線を描画
+                p1 = world_to_screen(0, y)
+                p2 = world_to_screen(self.room.width, y)
+                cv2.line(top_view_img, p1, p2, color, thickness)
+                
+                # ラベルを描画（主目盛りのみ）
+                if label_show and is_major and y > 0:
+                    label = f"{int(y)}"
+                    label_pos = world_to_screen(0, y)
+                    # ラベルを少し左に配置
+                    label_pos = (label_pos[0] - 35, label_pos[1] + 5)
+                    cv2.putText(top_view_img, label, label_pos, cv2.FONT_HERSHEY_SIMPLEX,
+                               label_font_scale, label_color, 1, cv2.LINE_AA)
+                
+                y += grid_interval
+                grid_count += 1
         
         # 部屋の輪郭を描画
         room_corners = [
@@ -841,12 +1006,12 @@ class RoomDesigner:
         
         # 家具を描画
         for furniture in self.room.furnitures:
-            # 家具の4隅
+            # 家具の4隅（UE5スタイル: X=前、Y=右）
             corners = [
                 (furniture.x, furniture.y),
-                (furniture.x + furniture.width, furniture.y),
-                (furniture.x + furniture.width, furniture.y + furniture.depth),
-                (furniture.x, furniture.y + furniture.depth)
+                (furniture.x + furniture.depth, furniture.y),  # X方向にdepth
+                (furniture.x + furniture.depth, furniture.y + furniture.width),  # Y方向にwidth
+                (furniture.x, furniture.y + furniture.width)
             ]
             
             # 家具の輪郭を描画

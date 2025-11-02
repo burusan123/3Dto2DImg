@@ -38,80 +38,89 @@ class Tranceform3D2D:
 
     def set_external_parameter(self, roll: float, pitch: float, yaw: float, tx: float, ty: float, tz: float):
         """
-        外部パラメータを設定する（カメラの位置と姿勢）
+        外部パラメータを設定する（カメラの位置と姿勢）- UE5スタイル
         
         【座標系の定義】
-        ワールド座標系（右手座標系）:
-          - X軸: 右方向
-          - Y軸: 前方向（奥行き）
-          - Z軸: 上方向（高さ）
+        ワールド座標系（右手座標系・UE5互換）:
+          - X軸: 前方向（Forward）
+          - Y軸: 右方向（Right）
+          - Z軸: 上方向（Up）
         
         【カメラの初期姿勢】（roll=0, pitch=0, yaw=0の時）
-          - カメラはZ軸の正の方向を向く（上を見ている）
-          - カメラの上方向はY軸の負の方向
+          - カメラはX軸の正の方向を向く（前を見ている）
+          - カメラの上方向はZ軸の正の方向
+          - カメラの右方向はY軸の正の方向
+        
+        【回転の定義】（UE5互換）
+          - Roll:  X軸周りの回転（前方軸）- 左右に傾く（カメラの回転）
+          - Pitch: Y軸周りの回転（右方軸）- 上下を見る
+          - Yaw:   Z軸周りの回転（上方軸）- 左右を向く
         
         【回転の適用順序】
           R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
-          1. roll:  X軸周りの回転（カメラを傾ける、上下を見る動き）
-          2. pitch: Y軸周りの回転（左右を向く動き）
-          3. yaw:   Z軸周りの回転（水平面での回転）
+          標準的なオイラー角の適用順序
         
         【トップビューの実現】
           位置: (x, y, z) = (部屋の中心X, 部屋の中心Y, 高いZ座標)
-          姿勢: roll=180, pitch=0, yaw=0
-          説明: X軸周りに180度回転することで、カメラが真下を向く
+          姿勢: roll=0, pitch=90, yaw=0
+          説明: Pitch=90度で真下を向く（Y軸周りに90度回転）
         
-        :param roll: X軸周りの回転角（度）180度で真下を向く
-        :param pitch: Y軸周りの回転角（度）
-        :param yaw: Z軸周りの回転角（度）
-        :param tx: カメラのX座標
-        :param ty: カメラのY座標
+        :param roll: X軸周りの回転角（度）カメラの左右傾き
+        :param pitch: Y軸周りの回転角（度）上下を見る角度（正で下、負で上）
+        :param yaw: Z軸周りの回転角（度）左右を向く角度
+        :param tx: カメラのX座標（前方向）
+        :param ty: カメラのY座標（右方向）
         :param tz: カメラのZ座標（高さ）
         """
         # 回転行列の計算（オイラー角からの変換）
-        Rx = self._rotation_matrix(roll, 0)   # X軸周りの回転
-        Ry = self._rotation_matrix(pitch, 1)  # Y軸周りの回転
-        Rz = self._rotation_matrix(yaw, 2)    # Z軸周りの回転
+        Rx = self._rotation_matrix(roll, 0)   # X軸周りの回転（Roll）
+        Ry = self._rotation_matrix(pitch, 1)  # Y軸周りの回転（Pitch）
+        Rz = self._rotation_matrix(yaw, 2)    # Z軸周りの回転（Yaw）
         self._R = Rz @ Ry @ Rx  # 回転の合成（右から順に適用）
         self._t = np.array([tx, ty, tz])  # カメラの位置（並進ベクトル）
 
     @staticmethod
     def _rotation_matrix(angle: float, axis: int) -> np.ndarray:
         """
-        回転行列を生成する（右手座標系）
+        回転行列を生成する（右手座標系・UE5互換）
         
-        【各軸周りの回転行列】
-        - X軸周り（roll）:  Y-Z平面での回転（上下を見る動き）
-        - Y軸周り（pitch）: Z-X平面での回転（左右を向く動き）
-        - Z軸周り（yaw）:   X-Y平面での回転（水平面での回転）
+        【各軸周りの回転行列】（UE5スタイル）
+        - X軸周り（Roll）:  前方軸周りの回転（左右に傾く）
+        - Y軸周り（Pitch）: 右方軸周りの回転（上下を見る）
+        - Z軸周り（Yaw）:   上方軸周りの回転（左右を向く）
+        
+        【座標系】
+        - X軸: 前（Forward）
+        - Y軸: 右（Right）  
+        - Z軸: 上（Up）
         
         【回転の方向】
         正の角度: 右手の法則に従った反時計回り
         各軸の正の方向に向かって見たときに反時計回りが正の回転
         
         :param angle: 回転角（度）
-        :param axis: 回転軸（0: X軸, 1: Y軸, 2: Z軸）
+        :param axis: 回転軸（0: X軸/Roll, 1: Y軸/Pitch, 2: Z軸/Yaw）
         :return: 3x3の回転行列
         """
         rad = math.radians(angle)
         c, s = math.cos(rad), math.sin(rad)
         
-        if axis == 0:  # X軸周りの回転（roll）
-            # Y -> Z の回転（正: Y軸がZ軸方向へ）
+        if axis == 0:  # X軸周りの回転（Roll）
+            # Y -> Z の回転（左右に傾く）
             return np.array([
                 [1,  0,  0],
                 [0,  c, -s],
                 [0,  s,  c]
             ])
-        elif axis == 1:  # Y軸周りの回転（pitch）
-            # Z -> X の回転（正: Z軸がX軸方向へ）
+        elif axis == 1:  # Y軸周りの回転（Pitch）
+            # Z -> X の回転（上下を見る）
             return np.array([
                 [ c,  0,  s],
                 [ 0,  1,  0],
                 [-s,  0,  c]
             ])
-        elif axis == 2:  # Z軸周りの回転（yaw）
-            # X -> Y の回転（正: X軸がY軸方向へ）
+        elif axis == 2:  # Z軸周りの回転（Yaw）
+            # X -> Y の回転（左右を向く）
             return np.array([
                 [c, -s,  0],
                 [s,  c,  0],
@@ -137,9 +146,17 @@ class Tranceform3D2D:
         point_3d = np.array([x, y, z])
         # ワールド座標 -> カメラ座標（カメラ位置を原点とした相対座標に変換してから回転）
         point_camera = self._R @ (point_3d - self._t)
-        # 透視投影（カメラ座標のZ > 0 が前方）
-        x_2d = self._fx * point_camera[0] / point_camera[2] + self._cx
-        y_2d = self._fy * point_camera[1] / point_camera[2] + self._cy
+        # 透視投影
+        # Pitch=89.5度（トップビュー）のとき:
+        #   - X軸が視線方向（深度）になる
+        #   - Y軸が画像の右方向
+        #   - Z軸が画像の上方向（正が上）
+        cam_forward = -point_camera[0]  # X軸の負の方向が前方（視線方向）
+        cam_right = point_camera[1]     # Y軸が右
+        cam_down = -point_camera[2]     # Z軸の負が下（正が上なので反転）
+        
+        x_2d = self._fx * cam_right / cam_forward + self._cx
+        y_2d = self._fy * cam_down / cam_forward + self._cy
         return int(x_2d), int(y_2d)
     
     def cvt_3d_to_2d_with_depth(self, x: float, y: float, z: float) -> Tuple[int, int, float]:
@@ -160,16 +177,20 @@ class Tranceform3D2D:
         point_3d = np.array([x, y, z])
         # ワールド座標 -> カメラ座標
         point_camera = self._R @ (point_3d - self._t)
-        depth = point_camera[2]
+        
+        # カメラ座標系のマッピング（cvt_3d_to_2dと同じ）
+        cam_forward = -point_camera[0]  # X軸の負の方向が前方（視線方向）
+        cam_right = point_camera[1]     # Y軸が右
+        cam_down = -point_camera[2]     # Z軸の負が下（正が上なので反転）
         
         # 深度が正の場合のみ投影計算
-        if depth > 0:
-            x_2d = self._fx * point_camera[0] / depth + self._cx
-            y_2d = self._fy * point_camera[1] / depth + self._cy
-            return int(x_2d), int(y_2d), depth
+        if cam_forward > 0:
+            x_2d = self._fx * cam_right / cam_forward + self._cx
+            y_2d = self._fy * cam_down / cam_forward + self._cy
+            return int(x_2d), int(y_2d), cam_forward
         else:
             # カメラの後ろにある場合は画面外の座標を返す
-            return -10000, -10000, depth
+            return -10000, -10000, cam_forward
     
     def is_point_visible(self, x: float, y: float, z: float, img_width: int, img_height: int, 
                         margin: float = 100) -> bool:

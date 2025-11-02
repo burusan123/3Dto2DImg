@@ -117,6 +117,26 @@ class ConfigLoader:
         """ホイールドラッグのY軸反転設定を取得"""
         return self.get('camera.mouse_drag.invert_y', False)
     
+    def get_mouse_view_rotation_sensitivity(self) -> float:
+        """マウス右クリックビュー回転の感度を取得"""
+        return self.get('camera.mouse_view_rotation.sensitivity', 0.2)
+    
+    def get_mouse_view_rotation_invert_x(self) -> bool:
+        """マウス右クリックビュー回転のX軸反転設定を取得"""
+        return self.get('camera.mouse_view_rotation.invert_x', False)
+    
+    def get_mouse_view_rotation_invert_y(self) -> bool:
+        """マウス右クリックビュー回転のY軸反転設定を取得"""
+        return self.get('camera.mouse_view_rotation.invert_y', False)
+    
+    def get_mouse_view_rotation_min_pitch(self) -> float:
+        """マウス右クリックビュー回転のpitch最小値を取得"""
+        return self.get('camera.mouse_view_rotation.min_pitch', -90)
+    
+    def get_mouse_view_rotation_max_pitch(self) -> float:
+        """マウス右クリックビュー回転のpitch最大値を取得"""
+        return self.get('camera.mouse_view_rotation.max_pitch', 90)
+    
     # 部屋設定
     def get_room_dimensions(self) -> Tuple[float, float, float]:
         """部屋のサイズを取得"""
@@ -182,7 +202,20 @@ class ConfigLoader:
             'camera_color': tuple(self.get('ui.top_view.camera_color', [0, 0, 255])),
             'view_direction_color': tuple(self.get('ui.top_view.view_direction_color', [255, 0, 0])),
             'fov_color': tuple(self.get('ui.top_view.fov_color', [255, 100, 100])),
-            'selected_color': tuple(self.get('ui.top_view.selected_color', [0, 200, 200]))
+            'selected_color': tuple(self.get('ui.top_view.selected_color', [0, 200, 200])),
+            # 目盛り設定
+            'grid': {
+                'enabled': self.get('ui.top_view.grid.enabled', True),
+                'interval': self.get('ui.top_view.grid.interval', 300),
+                'line_color': tuple(self.get('ui.top_view.grid.line_color', [200, 200, 200])),
+                'line_thickness': self.get('ui.top_view.grid.line_thickness', 1),
+                'major_interval': self.get('ui.top_view.grid.major_interval', 5),
+                'major_line_thickness': self.get('ui.top_view.grid.major_line_thickness', 2),
+                'major_line_color': tuple(self.get('ui.top_view.grid.major_line_color', [150, 150, 150])),
+                'label_color': tuple(self.get('ui.top_view.grid.label_color', [100, 100, 100])),
+                'label_font_scale': self.get('ui.top_view.grid.label_font_scale', 0.4),
+                'label_show': self.get('ui.top_view.grid.label_show', True)
+            }
         }
     
     # 座標精度設定
