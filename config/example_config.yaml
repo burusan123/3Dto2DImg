@@ -1,0 +1,107 @@
+# カスタム設定ファイルの例
+# このファイルをコピーして、独自の設定を作成できます
+
+# ウィンドウ設定
+window:
+  width: 1920
+  height: 1080
+
+# カメラ設定
+camera:
+  focal_length: 800
+  min_focal_length: 300
+  max_focal_length: 2500
+  zoom_step: 100
+  
+  initial_position:
+    x: 100
+    y: -600
+    z: 400
+  
+  initial_rotation:
+    roll: 0
+    pitch: 45
+    yaw: 0
+  
+  movement_speed: 15
+  rotation_speed: 10
+
+# 部屋設定
+room:
+  width: 600
+  depth: 600
+  height: 300
+  color: [100, 100, 100]
+
+# 家具設定
+furnitures:
+  - name: "大型テーブル"
+    position:
+      x: 200
+      y: 250
+      z: 0
+    size:
+      width: 200
+      height: 80
+      depth: 120
+    color: [139, 69, 19]  # 茶色
+  
+  - name: "チェア1"
+    position:
+      x: 150
+      y: 200
+      z: 0
+    size:
+      width: 50
+      height: 50
+      depth: 90
+    color: [70, 130, 180]  # スチールブルー
+  
+  - name: "チェア2"
+    position:
+      x: 350
+      y: 200
+      z: 0
+    size:
+      width: 50
+      height: 50
+      depth: 90
+    color: [70, 130, 180]  # スチールブルー
+  
+  - name: "キャビネット"
+    position:
+      x: 50
+      y: 50
+      z: 0
+    size:
+      width: 100
+      height: 180
+      depth: 50
+    color: [160, 82, 45]  # サドルブラウン
+  
+  - name: "ベッド"
+    position:
+      x: 400
+      y: 400
+      z: 0
+    size:
+      width: 180
+      height: 60
+      depth: 200
+    color: [220, 220, 220]  # ライトグレー
+
+# UI設定
+ui:
+  instructions:
+    font_scale: 0.6
+    color: [255, 255, 255]
+    thickness: 1
+    position: [15, 35]
+    line_spacing: 35
+  
+  zoom_display:
+    font_scale: 0.7
+    color: [0, 255, 255]
+    thickness: 2
+    position: [15, -25]
+

@@ -1,0 +1,131 @@
+# 3D Room Designer 設定ファイル
+
+# ウィンドウ設定
+window:
+  width: 1920
+  height: 1080
+
+# 座標精度設定（建築設計図・3DCAD対応）
+coordinate_precision:
+  # 座標の精度モード: "integer", "decimal_1", "decimal_2", "decimal_3", "full"
+  # integer: 整数のみ (例: 150)
+  # decimal_1: 小数点第1位まで (例: 150.5)
+  # decimal_2: 小数点第2位まで (例: 150.25)
+  # decimal_3: 小数点第3位まで (例: 150.125)
+  # full: フル精度（制限なし）
+  mode: "decimal_1"
+  
+  # グリッドスナップ設定
+  grid_snap:
+    enabled: true  # グリッドスナップを有効化
+    size: 10.0     # グリッドサイズ（単位系に応じて調整）
+  
+  # 単位系設定
+  unit:
+    system: "mm"  # mm, cm, m, inch, feet
+    display: true  # 単位を画面に表示
+
+# カメラ設定
+camera:
+  # 内部パラメータ
+  focal_length: 600  # 初期焦点距離
+  min_focal_length: 200  # 最小焦点距離（最大ズームアウト）
+  max_focal_length: 2000  # 最大焦点距離（最大ズームイン）
+  zoom_step: 50  # ズームステップ
+  
+  # 初期位置と姿勢
+  initial_position:
+    x: 0
+    y: -500
+    z: 300
+  
+  initial_rotation:
+    roll: 0
+    pitch: 30
+    yaw: 0
+  
+  # 移動・回転速度
+  movement_speed: 10  # カメラ移動速度
+  rotation_speed: 5   # カメラ回転速度
+
+# 部屋設定
+room:
+  width: 500   # 幅
+  depth: 500   # 奥行き
+  height: 250  # 高さ
+  color: [128, 128, 128]  # RGB色
+
+# 家具設定
+furnitures:
+  - name: "テーブル"
+    position:
+      x: 150
+      y: 200
+      z: 0
+    size:
+      width: 150
+      height: 75
+      depth: 100
+    color: [0, 255, 0]  # RGB (緑)
+  
+  - name: "椅子1"
+    position:
+      x: 100
+      y: 150
+      z: 0
+    size:
+      width: 50
+      height: 50
+      depth: 80
+    color: [0, 0, 255]  # RGB (青)
+  
+  - name: "椅子2"
+    position:
+      x: 300
+      y: 150
+      z: 0
+    size:
+      width: 50
+      height: 50
+      depth: 80
+    color: [0, 0, 255]  # RGB (青)
+  
+  - name: "ソファ"
+    position:
+      x: 50
+      y: 400
+      z: 0
+    size:
+      width: 200
+      height: 80
+      depth: 100
+    color: [255, 0, 0]  # RGB (赤)
+  
+  - name: "本棚"
+    position:
+      x: 400
+      y: 50
+      z: 0
+    size:
+      width: 80
+      height: 200
+      depth: 40
+    color: [255, 255, 0]  # RGB (黄)
+
+# UI設定
+ui:
+  # 操作説明の表示設定
+  instructions:
+    font_scale: 0.5
+    color: [255, 255, 255]
+    thickness: 1
+    position: [10, 30]
+    line_spacing: 30
+  
+  # ズームレベル表示設定
+  zoom_display:
+    font_scale: 0.6
+    color: [0, 255, 255]
+    thickness: 2
+    position: [10, -20]  # 負の値は画面下からのオフセット
+
