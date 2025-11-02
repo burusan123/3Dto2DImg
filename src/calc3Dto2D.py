@@ -65,8 +65,11 @@ class Tranceform3D2D:
           - Yaw:   Z軸周りの回転（上方軸）- 左右を向く
         
         【回転の適用順序】
-          R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
-          標準的なオイラー角の適用順序
+          R = Rx(roll) @ Ry(pitch) @ Rz(yaw)
+          ローカル座標系での回転順序（カメラ視点）
+          1. Yaw（Z軸周り）: 左右を向く
+          2. Pitch（ローカルY軸周り）: 上下を見る
+          3. Roll（ローカルX軸周り）: 左右に傾く
         
         【トップビューの実現】
           位置: (x, y, z) = (部屋の中心X, 部屋の中心Y, 高いZ座標)
@@ -84,7 +87,7 @@ class Tranceform3D2D:
         Rx = self._rotation_matrix(roll, 0)   # X軸周りの回転（Roll）
         Ry = self._rotation_matrix(pitch, 1)  # Y軸周りの回転（Pitch）
         Rz = self._rotation_matrix(yaw, 2)    # Z軸周りの回転（Yaw）
-        self._R = Rz @ Ry @ Rx  # 回転の合成（右から順に適用）
+        self._R = Rx @ Ry @ Rz  # 回転の合成（右から順に適用: Yaw→Pitch→Roll）
         self._t = np.array([tx, ty, tz])  # カメラの位置（並進ベクトル）
 
     @staticmethod

@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional
 from calc3Dto2D import Tranceform3D2D
 from config_loader import ConfigLoader
 from coordinate_precision import CoordinatePrecision
+from mouse_controller import MouseController
 
 class Drawable(ABC):
     """描画可能なオブジェクトの抽象基底クラス"""
@@ -464,17 +465,30 @@ class RoomDesigner:
         self.movement_speed = self.config.get_camera_movement_speed()
         self.rotation_speed = self.config.get_camera_rotation_speed()
         
-        # ホイールドラッグ設定
-        self.mouse_drag_sensitivity = self.config.get_mouse_drag_sensitivity()
-        self.mouse_drag_invert_x = self.config.get_mouse_drag_invert_x()
-        self.mouse_drag_invert_y = self.config.get_mouse_drag_invert_y()
+        # マウスコントローラーを初期化
+        mouse_config = {
+            'mouse_drag': {
+                'sensitivity': self.config.get_mouse_drag_sensitivity(),
+                'invert_x': self.config.get_mouse_drag_invert_x(),
+                'invert_y': self.config.get_mouse_drag_invert_y()
+            },
+            'mouse_view_rotation': {
+                'sensitivity': self.config.get_mouse_view_rotation_sensitivity(),
+                'invert_x': self.config.get_mouse_view_rotation_invert_x(),
+                'invert_y': self.config.get_mouse_view_rotation_invert_y(),
+                'min_pitch': self.config.get_mouse_view_rotation_min_pitch(),
+                'max_pitch': self.config.get_mouse_view_rotation_max_pitch()
+            },
+            'zoom': {
+                'min_focal_length': self.min_focal_length,
+                'max_focal_length': self.max_focal_length,
+                'zoom_step': self.zoom_step
+            }
+        }
+        self.mouse_controller = MouseController(mouse_config)
         
-        # 右クリックドラッグ（ビュー回転）設定
-        self.mouse_view_rotation_sensitivity = self.config.get_mouse_view_rotation_sensitivity()
-        self.mouse_view_rotation_invert_x = self.config.get_mouse_view_rotation_invert_x()
-        self.mouse_view_rotation_invert_y = self.config.get_mouse_view_rotation_invert_y()
-        self.mouse_view_rotation_min_pitch = self.config.get_mouse_view_rotation_min_pitch()
-        self.mouse_view_rotation_max_pitch = self.config.get_mouse_view_rotation_max_pitch()
+        # 選択中の家具
+        self.selected_furniture: Optional[Furniture] = None
         
         # UI設定
         self.instructions_config = self.config.get_instructions_config()
@@ -493,40 +507,6 @@ class RoomDesigner:
             unit_system=self.config.get_unit_system()
         )
         self.unit_display_enabled = self.config.get_unit_display_enabled()
-        
-        # ドラッグ＆ドロップ用の状態
-        self.selected_furniture: Optional[Furniture] = None
-        self.dragging = False
-        self.drag_offset_x = 0.0
-        self.drag_offset_y = 0.0
-        
-        # ホイールドラッグによるカメラ移動用の状態
-        self.camera_dragging = False
-        self.camera_drag_start_x = 0
-        self.camera_drag_start_y = 0
-        self.camera_drag_start_cam_y = 0.0
-        self.camera_drag_start_cam_z = 0.0
-        
-        # 左ドラッグによるUE5スタイルカメラ移動用の状態
-        self.ue5_camera_moving = False
-        self.ue5_move_start_x = 0
-        self.ue5_move_start_y = 0
-        self.ue5_move_start_cam_x = 0.0
-        self.ue5_move_start_yaw = 0.0
-        
-        # 右クリックドラッグによるカメラビュー回転用の状態
-        self.view_rotating = False
-        self.view_rotation_start_x = 0
-        self.view_rotation_start_y = 0
-        self.view_rotation_start_pitch = 0.0
-        self.view_rotation_start_yaw = 0.0
-        
-        # 右+左同時ドラッグによるY/Z軸移動用の状態
-        self.both_buttons_moving = False
-        self.both_buttons_start_x = 0
-        self.both_buttons_start_y = 0
-        self.both_buttons_start_cam_y = 0.0
-        self.both_buttons_start_cam_z = 0.0
         
         # 部屋の作成
         room_width, room_depth, room_height = self.config.get_room_dimensions()
@@ -601,19 +581,19 @@ class RoomDesigner:
                            0.6, (255, 255, 0), 2, cv2.LINE_AA)
             
             # ドラッグ中の情報を表示
-            if self.dragging and self.selected_furniture:
+            if self.mouse_controller.is_dragging_furniture() and self.selected_furniture:
                 drag_text = f"Dragging: {self.selected_furniture.name}"
                 cv2.putText(img, drag_text, (10, self.height - 50), cv2.FONT_HERSHEY_SIMPLEX, 
                            0.6, (0, 255, 0), 2, cv2.LINE_AA)
             
             # カメラドラッグ中の情報を表示
-            if self.camera_dragging:
+            if self.mouse_controller.is_panning_camera():
                 camera_drag_text = "Camera Pan (Middle Button Drag)"
                 cv2.putText(img, camera_drag_text, (10, self.height - 50), cv2.FONT_HERSHEY_SIMPLEX, 
                            0.6, (0, 255, 255), 2, cv2.LINE_AA)
             
             # カメラ回転中の情報を表示（デバッグ用）
-            if self.view_rotating:
+            if self.mouse_controller.is_rotating_view():
                 view_rotation_text = f"View Rotation: Pitch={self.camera_pitch:.1f}, Yaw={self.camera_yaw:.1f}, Roll={self.camera_roll:.1f}"
                 cv2.putText(img, view_rotation_text, (10, self.height - 80), cv2.FONT_HERSHEY_SIMPLEX, 
                            0.6, (255, 0, 255), 2, cv2.LINE_AA)
@@ -644,235 +624,62 @@ class RoomDesigner:
         :param flags: フラグ
         :param param: パラメータ
         """
-        if event == cv2.EVENT_LBUTTONDOWN:
-            # 左クリック: 家具の選択開始、またはUE5スタイルカメラ移動開始
-            
-            # 右ボタンも押されている場合は両ボタンモード
-            if self.view_rotating:
-                self.both_buttons_moving = True
-                self.both_buttons_start_x = x
-                self.both_buttons_start_y = y
-                self.both_buttons_start_cam_y = self.camera_y
-                self.both_buttons_start_cam_z = self.camera_z
-                # 他のモードを無効化
-                self.view_rotating = False
-                self.ue5_camera_moving = False
-                self.dragging = False
-                return
-            
-            # Shiftキーが押されているか確認（強制的にカメラ移動モード）
-            shift_pressed = (flags & cv2.EVENT_FLAG_SHIFTKEY) != 0
-            
-            if not shift_pressed:
-                # 家具を探す
-                furniture = self.room.find_furniture_at_point(x, y, self.transform, self.width, self.height)
-                
-                if furniture:
-                    # 以前の選択を解除
-                    if self.selected_furniture:
-                        self.selected_furniture.is_selected = False
-                    
-                    # 新しい家具を選択
-                    self.selected_furniture = furniture
-                    furniture.is_selected = True
-                    self.dragging = True
-                    
-                    # クリック位置を3D座標に変換
-                    click_world_pos = self._screen_to_world(x, y)
-                    if click_world_pos is not None:
-                        click_world_x, click_world_y = click_world_pos
-                        # 家具の位置とクリック位置の差分を保存（オフセット）
-                        self.drag_offset_x = furniture.x - click_world_x
-                        self.drag_offset_y = furniture.y - click_world_y
-                else:
-                    # 家具がない場合はUE5スタイルカメラ移動開始
-                    self.ue5_camera_moving = True
-                    self.ue5_move_start_x = x
-                    self.ue5_move_start_y = y
-                    self.ue5_move_start_cam_x = self.camera_x
-                    self.ue5_move_start_yaw = self.camera_yaw
-            else:
-                # Shift+左クリック: 強制的にUE5スタイルカメラ移動
-                self.ue5_camera_moving = True
-                self.ue5_move_start_x = x
-                self.ue5_move_start_y = y
-                self.ue5_move_start_cam_x = self.camera_x
-                self.ue5_move_start_yaw = self.camera_yaw
+        # カメラの現在状態を準備
+        camera_state = {
+            'x': self.camera_x,
+            'y': self.camera_y,
+            'z': self.camera_z,
+            'pitch': self.camera_pitch,
+            'yaw': self.camera_yaw,
+            'focal_length': self.focal_length
+        }
         
-        elif event == cv2.EVENT_MBUTTONDOWN:
-            # ホイールクリック: カメラ移動開始
-            self.camera_dragging = True
-            self.camera_drag_start_x = x
-            self.camera_drag_start_y = y
-            self.camera_drag_start_cam_y = self.camera_y
-            self.camera_drag_start_cam_z = self.camera_z
+        # 家具のヒットテスト関数
+        def furniture_hit_test(px: int, py: int) -> Optional[Furniture]:
+            return self.room.find_furniture_at_point(px, py, self.transform, self.width, self.height)
         
-        elif event == cv2.EVENT_MOUSEMOVE:
-            # マウス移動: ドラッグ中の処理
-            if self.both_buttons_moving:
-                # 右+左同時ドラッグ: Y/Z軸移動（左右・上下移動）
-                delta_x = x - self.both_buttons_start_x
-                delta_y = y - self.both_buttons_start_y
-                
-                # UE5の動作:
-                # - 左右ドラッグ（delta_x）→ Y軸移動（左右）
-                # - 上下ドラッグ（delta_y）→ Z軸移動（上下）
-                
-                # Y軸移動（左右）
-                self.camera_y = self.both_buttons_start_cam_y + delta_x * self.mouse_drag_sensitivity
-                
-                # Z軸移動（上下）
-                # 上にドラッグ（delta_y < 0）→ 上昇（Z増加）
-                # 下にドラッグ（delta_y > 0）→ 下降（Z減少）
-                move_amount = -delta_y * self.mouse_drag_sensitivity
-                self.camera_z = self.both_buttons_start_cam_z + move_amount
-                
-                # 最低高さ制限
-                self.camera_z = max(10, self.camera_z)
-            
-            elif self.dragging and self.selected_furniture:
-                # 家具のドラッグ
-                # 2D座標を3D座標に逆変換（床面上）
-                world_pos = self._screen_to_world(x, y)
-                if world_pos is not None:
-                    world_x, world_y = world_pos
-                    # オフセットを適用（クリックした位置と家具の位置の差分を保持）
-                    world_x += self.drag_offset_x
-                    world_y += self.drag_offset_y
-                    # 部屋の範囲内に制限
-                    world_x = max(0, min(world_x, self.room.width - self.selected_furniture.width))
-                    world_y = max(0, min(world_y, self.room.depth - self.selected_furniture.depth))
-                    # 座標精度を適用して移動
-                    self.selected_furniture.move_to(world_x, world_y, self.precision)
-            
-            elif self.ue5_camera_moving:
-                # UE5スタイルのカメラ移動（左ドラッグ）
-                # マウスの移動量を計算
-                delta_x = x - self.ue5_move_start_x
-                delta_y = y - self.ue5_move_start_y
-                
-                # UE5の動作:
-                # - マウス左右（delta_x）→ カメラのYaw回転（左右を向く）
-                # - マウス上下（delta_y）→ カメラのX座標移動（前後移動）
-                
-                # Yaw回転（左右を向く）
-                delta_yaw = delta_x * self.mouse_view_rotation_sensitivity
-                self.camera_yaw = self.ue5_move_start_yaw + delta_yaw
-                
-                # 前後移動（X軸方向）
-                # 上にドラッグ（delta_y < 0）→ 前進（X増加）
-                # 下にドラッグ（delta_y > 0）→ 後退（X減少）
-                move_amount = delta_y * self.mouse_drag_sensitivity
-                self.camera_x = self.ue5_move_start_cam_x + move_amount
-            
-            elif self.camera_dragging:
-                # カメラのドラッグ（ホイールボタン）
-                # マウスの移動量を計算
-                delta_x = x - self.camera_drag_start_x
-                delta_y = y - self.camera_drag_start_y
-                
-                # 設定に基づいて方向を反転
-                x_direction = -1 if self.mouse_drag_invert_x else 1
-                y_direction = -1 if self.mouse_drag_invert_y else 1
-                
-                # カメラ座標を更新
-                # マウス左右（delta_x） → カメラY座標（右方向）
-                # マウス上下（delta_y） → カメラZ座標（上方向）
-                # x_directionを反転（左右の反対を修正）
-                self.camera_y = self.camera_drag_start_cam_y - delta_x * self.mouse_drag_sensitivity * x_direction
-                self.camera_z = self.camera_drag_start_cam_z + delta_y * self.mouse_drag_sensitivity * y_direction
-                
-                # 最低高さ制限
-                self.camera_z = max(10, self.camera_z)
-            
-            elif self.view_rotating:
-                # カメラビューの回転（右クリックドラッグ - UE5スタイル）
-                # マウスの移動量を計算
-                delta_x = x - self.view_rotation_start_x
-                delta_y = y - self.view_rotation_start_y
-                
-                # 設定に基づいて方向を反転
-                x_direction = -1 if self.mouse_view_rotation_invert_x else 1
-                y_direction = -1 if self.mouse_view_rotation_invert_y else 1
-                
-                # マウスの移動量を角度に変換（UE5スタイル）
-                # X方向の移動 -> yaw（水平回転・左右を向く）
-                # Y方向の移動 -> pitch（上下を見る）
-                delta_yaw = delta_x * self.mouse_view_rotation_sensitivity * x_direction
-                delta_pitch = delta_y * self.mouse_view_rotation_sensitivity * y_direction
-                
-                # カメラの向きを更新
-                self.camera_yaw = self.view_rotation_start_yaw + delta_yaw
-                self.camera_pitch = self.view_rotation_start_pitch + delta_pitch
-                
-                # pitch を制限（真下から真上まで）
-                self.camera_pitch = max(self.mouse_view_rotation_min_pitch, 
-                                       min(self.mouse_view_rotation_max_pitch, self.camera_pitch))
+        # マウスイベントを処理
+        result = self.mouse_controller.handle_mouse_event(
+            event, x, y, flags,
+            camera_state,
+            furniture_hit_test,
+            self._screen_to_world
+        )
         
-        elif event == cv2.EVENT_LBUTTONUP:
-            # 左クリック解放: ドラッグ終了
-            if self.both_buttons_moving:
-                # 両ボタンモードから左を離した場合、右クリック回転モードに切り替え
-                self.both_buttons_moving = False
-                self.view_rotating = True
-                self.view_rotation_start_x = x
-                self.view_rotation_start_y = y
-                self.view_rotation_start_pitch = self.camera_pitch
-                self.view_rotation_start_yaw = self.camera_yaw
-            else:
-                self.dragging = False
-                self.ue5_camera_moving = False
+        # カメラ状態を更新
+        if result['camera_updated']:
+            self.camera_x = result['camera_x']
+            self.camera_y = result['camera_y']
+            self.camera_z = result['camera_z']
+            self.camera_pitch = result['camera_pitch']
+            self.camera_yaw = result['camera_yaw']
+            self.focal_length = result['focal_length']
         
-        elif event == cv2.EVENT_RBUTTONDOWN:
-            # 右クリック: カメラビュー回転開始
+        # 家具の操作を処理
+        if result['furniture_action'] == 'select':
+            # 以前の選択を解除
+            if self.selected_furniture:
+                self.selected_furniture.is_selected = False
             
-            # 左ボタンも押されている場合は両ボタンモード
-            if self.ue5_camera_moving or self.dragging:
-                self.both_buttons_moving = True
-                self.both_buttons_start_x = x
-                self.both_buttons_start_y = y
-                self.both_buttons_start_cam_y = self.camera_y
-                self.both_buttons_start_cam_z = self.camera_z
-                # 他のモードを無効化
-                self.ue5_camera_moving = False
-                self.dragging = False
-                self.view_rotating = False
-                return
-            
-            self.view_rotating = True
-            self.view_rotation_start_x = x
-            self.view_rotation_start_y = y
-            self.view_rotation_start_pitch = self.camera_pitch
-            self.view_rotation_start_yaw = self.camera_yaw
+            # 新しい家具を選択
+            furniture = result['selected_furniture']
+            if furniture:
+                furniture.is_selected = True
+                self.selected_furniture = furniture
         
-        elif event == cv2.EVENT_RBUTTONUP:
-            # 右クリック解放: カメラビュー回転終了
-            if self.both_buttons_moving:
-                # 両ボタンモードから右を離した場合、左ドラッグモードに切り替え
-                self.both_buttons_moving = False
-                self.ue5_camera_moving = True
-                self.ue5_move_start_x = x
-                self.ue5_move_start_y = y
-                self.ue5_move_start_cam_x = self.camera_x
-                self.ue5_move_start_yaw = self.camera_yaw
-            else:
-                self.view_rotating = False
+        elif result['furniture_action'] == 'drag':
+            # 家具をドラッグ
+            if self.selected_furniture and result['drag_position']:
+                world_x, world_y = result['drag_position']
+                # 部屋の範囲内に制限
+                world_x = max(0, min(world_x, self.room.width - self.selected_furniture.width))
+                world_y = max(0, min(world_y, self.room.depth - self.selected_furniture.depth))
+                # 座標精度を適用して移動
+                self.selected_furniture.move_to(world_x, world_y, self.precision)
         
-        elif event == cv2.EVENT_MBUTTONUP:
-            # ホイールボタン解放: カメラドラッグ終了
-            self.camera_dragging = False
-        
-        elif event == cv2.EVENT_MOUSEWHEEL:
-            # ホイール回転: ズームイン/アウト
-            # flagsの上位16ビットにホイールの回転量が格納されている
-            # 正の値: 上方向（ズームイン）、負の値: 下方向（ズームアウト）
-            delta = flags >> 16
-            if delta > 0:
-                # ズームイン
-                self.focal_length = min(self.focal_length + self.zoom_step, self.max_focal_length)
-            else:
-                # ズームアウト
-                self.focal_length = max(self.focal_length - self.zoom_step, self.min_focal_length)
+        elif result['furniture_action'] == 'drop':
+            # ドラッグ終了（特に処理なし）
+            pass
     
     def _screen_to_world(self, screen_x: int, screen_y: int) -> Optional[Tuple[float, float]]:
         """
